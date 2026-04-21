@@ -155,10 +155,13 @@ class Pipeline:
 
             # Post-stream: enrich with Joplin content if a deep-link was generated
             full_text = "".join(accumulated)
-            enriched = self._enrich_with_joplin(full_text)
-            if enriched != full_text:
-                # Yield the appended content separator and note body
-                yield f"\n\n---\n\n{enriched}"
+            # Fetch note content directly (don't re-yield the already-streamed text)
+            import re
+            match = re.search(r"joplin://x-callback-url/openNote\?id=([a-f0-9]+)", full_text)
+            if match:
+                note_content = self._fetch_joplin_note(match.group(1))
+                if note_content:
+                    yield f"\n\n---\n\n**Note content:**\n\n{note_content}"
 
             if self.valves.AUTO_SAVE_SESSIONS and self._tools_used:
                 try:

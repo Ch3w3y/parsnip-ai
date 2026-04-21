@@ -164,6 +164,17 @@ def check_joplin_notes() -> list:
         return [f"Error checking Joplin: {e}"]
 
 
+def check_analysis_outputs() -> list[dict]:
+    """Check for recently generated analysis artifacts."""
+    try:
+        r = requests.get("http://localhost:8095/outputs", timeout=10)
+        if r.status_code == 200:
+            return r.json().get("files", [])
+        return []
+    except Exception:
+        return []
+
+
 def run_test():
     results = []
     joplin_before = set(check_joplin_notes())
@@ -203,7 +214,18 @@ def run_test():
         else:
             print(f"[{datetime.now().isoformat()}] No new Joplin notes detected")
 
-        # Save individual result (now includes joplin_new_notes)
+        # Check for analysis artifacts (charts, word clouds, etc.)
+        vis_styles = {"Word Cloud", "Bar Chart", "Statistics", "Multi-Step Chain", "Cross-Domain Synthesis"}
+        if item["style"] in vis_styles:
+            analysis_files = check_analysis_outputs()
+            recent_pngs = [f for f in analysis_files if f.get("path", "").endswith(".png")]
+            result["analysis_outputs"] = recent_pngs[-3:] if recent_pngs else []
+            if recent_pngs:
+                print(f"[{datetime.now().isoformat()}] Analysis outputs: {[f['path'] for f in result['analysis_outputs']]}")
+            else:
+                print(f"[{datetime.now().isoformat()}] No analysis outputs detected")
+
+        # Save individual result (now includes joplin_new_notes + analysis_outputs)
         out_path = os.path.join(OUTPUT_DIR, f"research_pipeline_test_{num:02d}.json")
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
