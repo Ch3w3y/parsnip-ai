@@ -2,6 +2,7 @@
 .env
 *.env
 .env.*
+!.env.example
 gcs-key.json
 # Python
 __pycache__/
