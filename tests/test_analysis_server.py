@@ -154,6 +154,10 @@ class TestWorkspaceUserIsolation:
 
 class TestCache:
     def test_cache_stats_initial(self, client):
+        import analysis.server as srv
+
+        srv._cache_stats["hits"] = 0
+        srv._cache_stats["misses"] = 0
         response = client.get("/cache/stats")
         assert response.status_code == 200
         data = response.json()
