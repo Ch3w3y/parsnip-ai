@@ -77,7 +77,11 @@ def mock_ollama():
             pass
 
         async def post(self, url, json=None, **kwargs):
-            return MockResponse()
+            input_texts = json.get("input", []) if json else []
+            num_texts = len(input_texts) if isinstance(input_texts, list) else 1
+            return MockResponse(
+                json_data={"embeddings": [[0.1] * 1024 for _ in range(max(num_texts, 1))]}
+            )
 
     with patch("httpx.AsyncClient", return_value=MockClient()):
         yield MockClient
