@@ -593,6 +593,18 @@ def _get_llm(model: str | None = None, streaming: bool = True) -> ChatOpenAI:
             streaming=streaming,
         )
 
+    # Route to Ollama Cloud if model ID ends in :cloud
+    if selected.endswith(":cloud") and settings.ollama_api_key:
+        cloud_base = settings.ollama_cloud_url.rstrip("/")
+        if not cloud_base.endswith("/v1"):
+            cloud_base = f"{cloud_base}/v1"
+        return ChatOpenAI(
+            model=selected,
+            base_url=cloud_base,
+            api_key=settings.ollama_api_key,
+            streaming=streaming,
+        )
+
     return ChatOpenAI(
         model=selected,
         base_url="https://openrouter.ai/api/v1",
