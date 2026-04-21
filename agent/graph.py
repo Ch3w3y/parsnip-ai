@@ -495,7 +495,7 @@ def _invoke_with_fallback(llm, messages, tools: list | None = None, tier: str = 
     fallback_chain = _get_cascading_fallbacks(current_model, tier)
     streaming = getattr(llm, "streaming", True)
 
-    # If circuit is open, jump straight to fallbacks
+    # If circuit is open, jump straight to fallbacks (skip primary model entirely)
     if _circuit_is_open():
         for fallback_id in fallback_chain:
             logger.info(f"Circuit open — trying fallback model {fallback_id}")
@@ -520,6 +520,10 @@ def _invoke_with_fallback(llm, messages, tools: list | None = None, tier: str = 
         gpu_result = _try_gpu_fallback(messages, tools, streaming)
         if gpu_result is not None:
             return gpu_result
+        raise RuntimeError(
+            "OpenRouter circuit is open and all fallback models (including GPU) failed. "
+            "Please check your API quota or wait for cooldown."
+        )
 
     try:
         return llm.invoke(messages)

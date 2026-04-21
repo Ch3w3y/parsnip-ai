@@ -193,7 +193,7 @@ async def chat_sync(req: ChatRequest):
         "memory_context": memory_ctx,
     }
 
-    result = await agent.ainvoke(state, config={**config, "recursion_limit": 35})
+    result = await agent.ainvoke(state, config={**config, "recursion_limit": 100})
     last = result["messages"][-1]
     return ChatResponse(thread_id=thread_id, content=last.content)
 
