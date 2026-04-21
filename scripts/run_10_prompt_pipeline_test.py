@@ -134,19 +134,33 @@ def send_prompt_via_pipeline(prompt: str, thread_id: str) -> dict:
         return {"error": str(e)}
 
 
-def check_joplin_notes() -> list:
-    """Check for notes in the Research Outputs notebook.
+def check_joplin_notes(notebook_title: str = "LLM Generated - Research Outputs") -> list:
+    """Check for notes in the target notebook only.
 
-    Parses the markdown format returned by joplin_search_notes:
-      ## Note Title
-      `note_id`
-      content...
-      ---
+    Parses the markdown format returned by joplin_search_notes.
     """
     try:
+        # First list notebooks to get the target notebook ID
+        r = requests.post(
+            f"{JOPLIN_MCP_URL}/tools/joplin_list_notebooks",
+            json={"tool": "joplin_list_notebooks", "arguments": {}},
+            timeout=10,
+        )
+        r.raise_for_status()
+        notebooks_data = r.json().get("result", "")
+        notebook_id = ""
+        for line in notebooks_data.split("\n"):
+            if notebook_title in line and "`" in line:
+                notebook_id = line.split("`")[1].split("`")[0]
+                break
+
+        if not notebook_id:
+            return []
+
+        # Search notes within that notebook
         r = requests.post(
             f"{JOPLIN_MCP_URL}/tools/joplin_search_notes",
-            json={"tool": "joplin_search_notes", "arguments": {"query": "", "limit": 50}},
+            json={"tool": "joplin_search_notes", "arguments": {"query": f"notebook:{notebook_id}", "limit": 50}},
             timeout=10,
         )
         r.raise_for_status()
@@ -164,12 +178,26 @@ def check_joplin_notes() -> list:
         return [f"Error checking Joplin: {e}"]
 
 
-def check_analysis_outputs() -> list[dict]:
-    """Check for recently generated analysis artifacts."""
+def check_analysis_outputs(since_timestamp: float = 0) -> list[dict]:
+    """Check for analysis artifacts created after the given timestamp."""
     try:
         r = requests.get("http://localhost:8095/outputs", timeout=10)
         if r.status_code == 200:
-            return r.json().get("files", [])
+            files = r.json().get("files", [])
+            # Filter to files modified after the prompt started
+            from datetime import datetime, timezone
+            recent = []
+            for f in files:
+                modified_str = f.get("modified", "")
+                if modified_str:
+                    try:
+                        modified_dt = datetime.fromisoformat(modified_str.replace("Z", "+00:00"))
+                        modified_ts = modified_dt.timestamp()
+                        if modified_ts >= since_timestamp:
+                            recent.append(f)
+                    except ValueError:
+                        continue
+            return recent
         return []
     except Exception:
         return []
@@ -217,7 +245,7 @@ def run_test():
         # Check for analysis artifacts (charts, word clouds, etc.)
         vis_styles = {"Word Cloud", "Bar Chart", "Statistics", "Multi-Step Chain", "Cross-Domain Synthesis"}
         if item["style"] in vis_styles:
-            analysis_files = check_analysis_outputs()
+            analysis_files = check_analysis_outputs(since_timestamp=start_time)
             recent_pngs = [f for f in analysis_files if f.get("path", "").endswith(".png")]
             result["analysis_outputs"] = recent_pngs[-3:] if recent_pngs else []
             if recent_pngs:
