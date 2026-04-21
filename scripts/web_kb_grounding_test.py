@@ -54,11 +54,13 @@ PROMPTS = [
     },
 ]
 
-def send(prompt):
+def send(prompt, chat_id):
     r = requests.post(URL, json={
         "model":"research_agent",
         "messages":[{"role":"user","content":prompt}],
         "stream":False,
+        "chat_id": chat_id,
+        "metadata": {"chat_id": chat_id},
     }, headers={"Authorization":f"Bearer {KEY}","Content-Type":"application/json"}, timeout=300)
     r.raise_for_status()
     data = r.json()
@@ -76,7 +78,8 @@ print(f"[{datetime.now().isoformat()}] Starting Web+KB Grounding Tests\n")
 for item in PROMPTS:
     print(f"Prompt {item['num']} — {item['name']}")
     start = time.time()
-    content = send(item["prompt"])
+    chat_id = f"web-kb-test-{item['num']}-{int(start)}"
+    content = send(item["prompt"], chat_id)
     elapsed = time.time() - start
     print(f"  -> {elapsed:.1f}s | Response length: {len(content)}")
     has_joplin = "joplin://" in content
