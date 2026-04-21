@@ -58,12 +58,12 @@ It is built for teams that want full control over models, data, and deployment.
 
 ## Why It’s Different
 
-- Fully open source and self-hostable.
-- Grounded generation via explicit ingestion and traceable sources.
-- Agentic memory + retrieval in one cohesive stack.
-- Pluggable data onboarding: APIs, notes, markdown, PDFs, and domain-specific connectors.
-- **Hybrid RAG** — synthesizes live web search with curated knowledge base grounding (see below).
-- Configurable model routing through `.env` (OpenRouter, OpenAI-compatible endpoints, local/remote Ollama embeddings).
+- **Fully Open Source & Self-Hostable:** Every component, including the underlying LLMs, can be run on-premise.
+- **Truly Local Reasoning:** Optimized for **Moonshot AI / Kimi-k2.6** (available via Ollama), providing state-of-the-art analytical reasoning and coding capabilities in a fully private stack.
+- **Grounded Generation:** Traceable sources via explicit ingestion.
+- **Agentic Memory + Retrieval:** Long-term persistence and session-aware context.
+- **Hybrid RAG:** Synthesizes live web search with curated knowledge base grounding.
+- **Configurable Model Routing:** Dynamic complexity-based routing to local GPU models or remote providers via OpenRouter.
 
 ## Hybrid RAG: Web + KB Synthesis
 

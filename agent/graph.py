@@ -1134,7 +1134,7 @@ Examples:
         if not user_msg:
             return None
 
-        classifier_model = os.environ.get("CLASSIFIER_MODEL", "qwen2.5:3b")
+        classifier_model = os.environ.get("CLASSIFIER_MODEL", settings.gpu_llm_model or "qwen2.5:3b")
 
         try:
             payload = {

@@ -58,6 +58,15 @@ prompt3 = """Investigate the impact of climate change on agriculture in Southeas
 4. Create a visualization (e.g., a regional map or bar chart) showing projected yield changes by 2030.
 5. Provide the report in English, but include a 'Methodology' section in French."""
 
+# Test Case 4: Final Stress Test - Supply Chain & Geopolitics
+prompt4 = """Provide a strategic analysis of the Global Semiconductor Supply Chain in 2026, focusing on the 'AI Chip' bottleneck.
+1. Use `search_web` to find latest 2025/2026 news on fab capacity in Arizona (Intel/TSMC) and recent export restrictions.
+2. Use `kb_search` to find background on TSMC's 2nm transition and ASML lithography technical specs.
+3. Use the `analysis_server` to create a chart (Python) comparing projected chip demand (2024-2030) vs actual production capacity found in research.
+4. Synthesize a SWOT analysis for the Western semiconductor strategy.
+5. Create a Joplin note titled '2026 Semiconductor Strategic Outlook'.
+6. Provide the final report in English, with a summary in Mandarin and Dutch."""
+
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         test_num = int(sys.argv[1])
@@ -67,9 +76,5 @@ if __name__ == "__main__":
             send_prompt(prompt2)
         elif test_num == 3:
             send_prompt(prompt3)
-    else:
-        # Run a sequence
-        _, cid1 = send_prompt(prompt1)
-        # Give it a moment between runs
-        time.sleep(5)
-        _, cid2 = send_prompt(prompt2)
+        elif test_num == 4:
+            send_prompt(prompt4)
