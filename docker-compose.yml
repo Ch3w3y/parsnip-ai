@@ -147,12 +147,14 @@ services:
         condition: service_healthy
 
   # ── Analysis Server (Python + R data analysis with DB access) ──────────────
+  # NOTE: linux/amd64 only — upstream rocker/tidyverse does not publish arm64.
   analysis:
     build:
       context: ./analysis
       dockerfile: Dockerfile
       network: host
     image: ghcr.io/ch3w3y/parsnip-ai/analysis:${IMAGE_TAG:-latest}
+    platform: linux/amd64
     container_name: pi_agent_analysis
     restart: unless-stopped
     network_mode: host
