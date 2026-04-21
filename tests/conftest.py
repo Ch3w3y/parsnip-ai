@@ -60,11 +60,12 @@ def mock_ollama():
     """Mock Ollama embedding endpoint."""
 
     class MockResponse:
-        def __init__(self):
+        def __init__(self, json_data=None):
             self.status_code = 200
+            self._json_data = json_data or {"embeddings": [[0.1] * 1024]}
 
         def json(self):
-            return {"embeddings": [[0.1] * 1024]}
+            return self._json_data
 
         def raise_for_status(self):
             pass
@@ -80,7 +81,7 @@ def mock_ollama():
             input_texts = json.get("input", []) if json else []
             num_texts = len(input_texts) if isinstance(input_texts, list) else 1
             return MockResponse(
-                json_data={"embeddings": [[0.1] * 1024 for _ in range(max(num_texts, 1))]}
+                json_data={"embeddings": [[0.1] * 1024 for _ in range(num_texts)]}
             )
 
     with patch("httpx.AsyncClient", return_value=MockClient()):
