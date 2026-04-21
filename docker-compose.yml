@@ -9,7 +9,8 @@ services:
   # Bridge mode so Joplin can reach it by container name (pi_agent_postgres).
   # Port 5432 mapped to host — all network_mode:host services still use localhost:5432.
   postgres:
-    image: timescale/timescaledb-ha:pg16
+    # Pinned to tested digest — update only after verifying new image
+    image: timescale/timescaledb-ha:pg16@sha256:b3d038d0a0757df8a5ec0a94ba68d9ad57b0e16100a024cf4b370c77ad5645f7
     container_name: pi_agent_postgres
     restart: unless-stopped
     networks:
@@ -37,7 +38,8 @@ services:
   # NOTE: must use pi_agent_net + container name for POSTGRES_HOST — the Joplin image
   # deliberately converts 'localhost'/'127.0.0.1' to 'host.docker.internal' in Docker.
   joplin-server:
-    image: joplin/server:latest
+    # Pinned to tested digest — update only after verifying new image
+    image: joplin/server:latest@sha256:5d9e7f9d31b436cb1b99d1a6a65d8c5bf760829094617e8ad1e956fd925de888
     container_name: pi_agent_joplin
     restart: unless-stopped
     networks:
@@ -66,7 +68,8 @@ services:
   # JSON API at http://localhost:8080/search?q=...&format=json
   # Used by web_search tool when SEARCH_BACKEND=searxng (or as auto-fallback).
   searxng:
-    image: searxng/searxng:latest
+    # Pinned to tested digest — update only after verifying new image
+    image: searxng/searxng:latest@sha256:0bbe85fb9bebe413a26c0e385c76309d15c91fdb9dc8a6bf01b35b714d0ece43
     container_name: pi_agent_searxng
     restart: unless-stopped
     network_mode: host
@@ -181,7 +184,8 @@ services:
   # ── OpenWebUI Pipelines (middleware between OpenWebUI and LangGraph) ────────
   # Must start before OpenWebUI so the API endpoint is ready
   pipelines:
-    image: ghcr.io/open-webui/pipelines:main
+    # Pinned to tested digest — update only after verifying new image
+    image: ghcr.io/open-webui/pipelines:main@sha256:b48e9bc338ce2be0acfbeff01810db72408a12f07739f9e3879c1f2b00952d6e
     container_name: pi_agent_pipelines
     restart: unless-stopped
     network_mode: host
@@ -222,7 +226,8 @@ services:
 
   # ── OpenWebUI ───────────────────────────────────────────────────────────────
   openwebui:
-    image: ghcr.io/open-webui/open-webui:main
+    # Pinned to tested digest — update only after verifying new image
+    image: ghcr.io/open-webui/open-webui:main@sha256:b8095f79a6a8ffad8f830bdacc9b5b0aef805689b31bca0b065cc2424d3cfaeb
     container_name: pi_agent_openwebui
     restart: unless-stopped
     network_mode: host
