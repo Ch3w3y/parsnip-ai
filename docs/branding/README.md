@@ -1,8 +1,9 @@
 # Branding Assets
 
-Place the project logo asset here for repository and documentation use:
+Project logo assets for repository and documentation use:
 
-- `docs/branding/logo.svg` (default in README)
-- `docs/branding/logo.png` (optional raster override)
+- `docs/branding/logo-primary.png` (current primary logo used in root README)
+- `docs/branding/logo-badge.png` (badge/alternate mark)
+- `docs/branding/logo.svg` (legacy/generated fallback)
 
-Update `README.md` references once the logo file is present.
+If needed, update root `README.md` image references to switch between variants.
