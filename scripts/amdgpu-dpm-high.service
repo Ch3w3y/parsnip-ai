@@ -1,0 +1,11 @@
+[Unit]
+Description=Set AMD GPU DPM to high performance (prevents RDNA4 bus drops)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'echo high > /sys/class/drm/card1/device/power_dpm_force_performance_level || echo high > /sys/class/drm/card0/device/power_dpm_force_performance_level'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

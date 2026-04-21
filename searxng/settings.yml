@@ -1,0 +1,62 @@
+# SearXNG configuration for pi-agent unified stack
+# Docs: https://docs.searxng.org/admin/settings/
+
+use_default_settings: true
+
+general:
+  debug: false
+  instance_name: "pi-agent search"
+  contact_url: false
+  enable_metrics: false
+
+server:
+  port: 8080
+  bind_address: "0.0.0.0"
+  secret_key: "pi-agent-searxng-secret"
+  limiter: false          # no rate limiting — internal use only
+  image_proxy: false
+  http_protocol_version: "1.0"
+  method: "POST"
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "en"
+  ban_time_on_fail: 5
+  max_ban_time_on_fail: 120
+  formats:
+    - html
+    - json              # required for API use
+
+engines:
+  - name: google
+    engine: google
+    shortcut: g
+    use_mobile_ui: false
+
+  - name: bing
+    engine: bing
+    shortcut: b
+
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: d
+
+  - name: wikipedia
+    engine: wikipedia
+    shortcut: wp
+    disabled: true      # already in KB — avoid surface noise
+
+  - name: arxiv
+    engine: arxiv
+    shortcut: ax
+    disabled: true      # already in KB via ingest_arxiv.py
+
+ui:
+  static_use_hash: true
+  default_locale: "en"
+  query_in_title: false
+  infinite_scroll: false
+  results_on_new_tab: false
+  theme_args:
+    simple_style: auto

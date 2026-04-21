@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+"""
+Daily backup of knowledge_chunks and agent_memories to GCS as Parquet.
+
+Usage:
+  python backup_kb.py                  # Full backup to GCS
+  python backup_kb.py --local          # Full backup to local directory only
+  python backup_kb.py --gcs-bucket my-bucket  # Override bucket name
+  python backup_kb.py --full           # Full backup (default)
+  python backup_kb.py --retain 7      # Keep last N backups on GCS (default 7)
+
+Outputs:
+  gs://<bucket>/backups/YYYY-MM-DD/knowledge_chunks.parquet
+  gs://<bucket>/backups/YYYY-MM-DD/agent_memories.parquet
+  gs://<bucket>/backups/YYYY-MM-DD/metadata.json
+
+Parquet format with snappy compression for BigQuery/Cloud SQL compatibility.
+Partition columns: source (for knowledge_chunks), category (for agent_memories).
+"""
+
+import argparse
+import json
+import logging
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+import psycopg
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
+
+DB_URL = os.environ.get("DATABASE_URL", "postgresql://agent:[REDACTED]@localhost:5432/agent_kb")
+
+
+def export_table_to_parquet(conn, table: str, columns: list[str], output_path: Path, partition_col: str | None = None):
+    """Export a PostgreSQL table to Parquet via pandas."""
+    import pandas as pd
+
+    col_str = ", ".join(columns)
+    query = f"SELECT {col_str} FROM {table}"
+    if table == "knowledge_chunks":
+        query += " WHERE embedding IS NOT NULL"
+
+    logger.info(f"Exporting {table}...")
+    df = pd.read_sql(query, conn)
+
+    if df.empty:
+        logger.warning(f"No rows in {table}")
+        return
+
+    logger.info(f"  {len(df)} rows, {len(df.columns)} columns")
+
+    # Convert timestamp columns to timezone-aware for Parquet compatibility
+    for col in df.columns:
+        if pd.api.types.is_datetime64_any_dtype(df[col]):
+            if df[col].dt.tz is None:
+                df[col] = df[col].dt.tz_localize("UTC")
+
+    # Serialize JSONB columns to string — pyarrow can't handle mixed list/dict objects
+    import json as _json
+    for col in df.columns:
+        if df[col].dtype == object:
+            sample = df[col].dropna().head(10)
+            if sample.apply(lambda x: isinstance(x, (dict, list))).any():
+                df[col] = df[col].apply(lambda x: _json.dumps(x) if x is not None else None)
+
+    df.to_parquet(output_path, engine="pyarrow", compression="snappy", index=False)
+    size_mb = output_path.stat().st_size / (1024 * 1024)
+    logger.info(f"  Written to {output_path} ({size_mb:.1f} MB)")
+
+
+def backup_to_local(output_dir: Path) -> dict:
+    """Backup both tables to local Parquet files."""
+    import pandas as pd
+
+    conn = psycopg.connect(DB_URL)
+    try:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        backup_dir = output_dir / today
+        backup_dir.mkdir(parents=True, exist_ok=True)
+
+        kb_path = backup_dir / "knowledge_chunks.parquet"
+        mem_path = backup_dir / "agent_memories.parquet"
+        meta_path = backup_dir / "metadata.json"
+
+        export_table_to_parquet(
+            conn,
+            "knowledge_chunks",
+            ["id", "source", "source_id", "chunk_index", "content", "metadata",
+             "embedding_model", "user_id", "created_at", "updated_at"],
+            kb_path,
+        )
+
+        export_table_to_parquet(
+            conn,
+            "agent_memories",
+            ["id", "category", "content", "importance", "created_at", "updated_at",
+             "deleted_at", "metadata"],
+            mem_path,
+        )
+
+        # Get stats
+        kb_count = pd.read_parquet(kb_path).shape[0] if kb_path.exists() else 0
+        mem_count = pd.read_parquet(mem_path).shape[0] if mem_path.exists() else 0
+
+        metadata = {
+            "date": today,
+            "knowledge_chunks_count": kb_count,
+            "agent_memories_count": mem_count,
+            "knowledge_chunks_size_mb": round(kb_path.stat().st_size / (1024 * 1024), 2) if kb_path.exists() else 0,
+            "agent_memories_size_mb": round(mem_path.stat().st_size / (1024 * 1024), 2) if mem_path.exists() else 0,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        with open(meta_path, "w") as f:
+            json.dump(metadata, f, indent=2)
+
+        logger.info(f"Local backup complete: {backup_dir}")
+        return metadata
+
+    finally:
+        conn.close()
+
+
+
+
+
+def upload_to_gcs(local_dir: Path, bucket_name: str, retain: int = 7):
+    """Upload local backup to GCS and rotate old backups."""
+    sys.path.insert(0, str(Path(__file__).parent.parent / "storage"))
+    from gcs import GCSClient
+
+    gcs = GCSClient()
+    # Override bucket name if provided
+    gcs.bucket_name = bucket_name
+    gcs._bucket = None
+
+    if not gcs.available:
+        logger.error("GCS not available. Cannot upload.")
+        return False
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    local_today = local_dir / today
+
+    if not local_today.exists():
+        logger.error(f"No local backup found for {today}")
+        return False
+
+    # Upload each file
+    for f in local_today.iterdir():
+        gcs_path = f"backups/{today}/{f.name}"
+        content_type = "application/octet-stream" if f.suffix == ".parquet" else "application/json"
+        gcs.upload_file(str(f), gcs_path, content_type=content_type)
+        logger.info(f"  Uploaded {f.name} to gs://{bucket_name}/{gcs_path}")
+
+    # Rotate old backups
+    all_backups = gcs.list_objects("backups/")
+    backup_dates = sorted(set(obj.split("/")[1] for obj in all_backups if obj.startswith("backups/")))
+    for old_date in backup_dates[:-retain]:
+        deleted = gcs.delete_prefix(f"backups/{old_date}/")
+        logger.info(f"  Rotated backup {old_date} ({deleted} objects)")
+
+    # Also upload to "latest" symlink
+    for f in local_today.iterdir():
+        gcs_path = f"backups/latest/{f.name}"
+        gcs.upload_file(str(f), gcs_path, content_type="application/octet-stream" if f.suffix == ".parquet" else "application/json")
+
+    logger.info(f"GCS backup complete: gs://{bucket_name}/backups/{today}/")
+    return True
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Backup knowledge base to Parquet")
+    parser.add_argument("--local", action="store_true", help="Only backup locally, skip GCS upload")
+    parser.add_argument("--gcs-bucket", default=os.environ.get("GCS_BUCKET", "agentic-data-storage"), help="GCS bucket name")
+    parser.add_argument("--output-dir", default=os.environ.get("BACKUP_DIR", "/tmp/kb-backups"), help="Local output directory")
+    parser.add_argument("--retain", type=int, default=7, help="Number of GCS backups to retain (default 7)")
+    args = parser.parse_args()
+
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    metadata = backup_to_local(output_dir)
+
+    if not args.local:
+        upload_to_gcs(output_dir, args.gcs_bucket, args.retain)
+
+    logger.info(f"Backup complete. Stats: {json.dumps(metadata, indent=2)}")
+
+
+if __name__ == "__main__":
+    main()

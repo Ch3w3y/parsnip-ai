@@ -1,0 +1,40 @@
+# Secrets
+.env
+*.env
+.env.*
+gcs-key.json
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+.uv/
+
+# Data / dumps / backups (landing zone raw files + Wikipedia extracted dump)
+ingestion/data/
+backups/
+*.parquet
+*.bz2
+*.xml
+
+# Postgres data volume
+db/data/
+
+ingestion/.venv/
+ingestion/data/
+
+# KB report state (persists Joplin note ID across runs)
+scripts/.kb_report_note_id
+
+# Logs
+*.log
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo

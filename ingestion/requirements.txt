@@ -1,0 +1,7 @@
+psycopg[binary]==3.3.3
+pgvector==0.4.2
+httpx==0.28.1
+wikiextractor==3.0.6
+tqdm==4.67.3
+python-dotenv==1.2.2
+aiofiles==25.1.0

@@ -1,0 +1,8 @@
+ingestion/data/
+ingestion/__pycache__/
+ingestion/.venv/
+.venv/
+__pycache__/
+*.pyc
+backups/
+.env
