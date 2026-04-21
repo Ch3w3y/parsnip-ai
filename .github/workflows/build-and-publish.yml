@@ -39,6 +39,10 @@ jobs:
           pip install -r agent/requirements.txt
 
       - name: Run static / unit tests
+        env:
+          DATABASE_URL: postgresql://agent:test@localhost:5432/agent_kb
+          ANALYSIS_URL: http://localhost:8095
+          JOPLIN_MCP_URL: http://localhost:8090
         run: pytest -m "not integration and not slow"
 
   build-and-push:
