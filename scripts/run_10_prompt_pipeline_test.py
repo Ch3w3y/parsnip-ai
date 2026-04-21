@@ -92,12 +92,18 @@ PROMPTS = [
 ]
 
 
-def send_prompt_via_pipeline(prompt: str) -> dict:
-    """Send a prompt through the OpenWebUI pipeline (port 9099)."""
+def send_prompt_via_pipeline(prompt: str, thread_id: str) -> dict:
+    """Send a prompt through the OpenWebUI pipeline (port 9099).
+
+    Uses a unique chat_id per prompt to isolate threads and prevent
+    context contamination between test runs.
+    """
     payload = {
         "model": "research_agent",
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
+        "chat_id": thread_id,
+        "metadata": {"chat_id": thread_id},
     }
     headers = {
         "Content-Type": "application/json",
@@ -170,7 +176,8 @@ def run_test():
         print(f"Prompt: {item['prompt'][:100]}...")
         
         start_time = time.time()
-        response = send_prompt_via_pipeline(item["prompt"])
+        thread_id = f"research-test-{num}-{int(start_time)}"
+        response = send_prompt_via_pipeline(item["prompt"], thread_id)
         elapsed = time.time() - start_time
         
         result = {
