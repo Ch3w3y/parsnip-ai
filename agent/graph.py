@@ -384,7 +384,8 @@ async def _load_l1_memory(thread_id: str, db_url: str) -> str:
 
 # ── Circuit breaker for OpenRouter rate-limit / quota exhaustion ───────────
 # When OpenRouter returns 403 (key limit), 429 (rate limit), or 402 (payment),
-# we automatically fallback to GPU Ollama for a cooldown period.
+# we rotate to the next model in the alias fallback chain.
+# NOTE: GPU Ollama is reserved for embeddings ONLY — not used for agentic tasks.
 
 _OPENROUTER_TRIPPED = False
 _OPENROUTER_TRIPPED_AT: float | None = None
@@ -397,7 +398,7 @@ def _trip_circuit():
     with _OPENROUTER_LOCK:
         _OPENROUTER_TRIPPED = True
         _OPENROUTER_TRIPPED_AT = time.time()
-    logger.warning("OpenRouter circuit breaker TRIPPED — falling back to GPU Ollama")
+    logger.warning("OpenRouter circuit breaker TRIPPED — rotating to fallback model")
 
 
 def _reset_circuit():
@@ -434,50 +435,124 @@ def _is_rate_limit_error(e: Exception) -> bool:
     return any(c in msg for c in codes)
 
 
-def _invoke_with_fallback(llm, messages, tools: list | None = None):
-    """Invoke LLM; on OpenRouter rate-limit, rebuild with GPU and retry once.
+def _get_cascading_fallbacks(current_model: str, current_tier: str) -> list[str]:
+    """Build a cascading fallback list: same-tier → mid-tier → low/free-tier (GPU).
 
-    Preserves tool bindings on fallback by re-calling bind_tools(...) when
-    the original LLM was already tool-bound.
+    Each tier has exactly one model. GPU low-tier is the final safety net.
+    """
+    from config import MODEL_ALIASES, TIER_ALIASES
+
+    fallbacks: list[str] = []
+
+    # 1. If high tier, add mid-tier model
+    if current_tier == "high":
+        mid_alias = TIER_ALIASES.get("mid", "smart")
+        mid_chain = MODEL_ALIASES.get(mid_alias, [])
+        if mid_chain and mid_chain[0] != current_model:
+            fallbacks.append(mid_chain[0])
+
+    # 2. Add low/free-tier model (OpenRouter)
+    low_alias = TIER_ALIASES.get("low", "fast")
+    low_chain = MODEL_ALIASES.get(low_alias, [])
+    if low_chain and low_chain[0] != current_model and low_chain[0] not in fallbacks:
+        fallbacks.append(low_chain[0])
+
+    return fallbacks
+
+
+def _try_gpu_fallback(messages, tools, streaming):
+    """Final fallback to GPU Ollama for low-tier tasks."""
+    from config import get_settings
+    settings = get_settings()
+    if not settings.gpu_llm_enabled or not settings.gpu_llm_model:
+        return None
+    logger.info(f"Trying GPU fallback: {settings.gpu_llm_model}")
+    fallback_llm = ChatOpenAI(
+        model=settings.gpu_llm_model,
+        base_url=f"{settings.gpu_llm_url}/v1",
+        api_key="not-needed",
+        streaming=streaming,
+    )
+    if tools:
+        fallback_llm = fallback_llm.bind_tools(tools)
+    try:
+        return fallback_llm.invoke(messages)
+    except Exception as e:
+        logger.warning(f"GPU fallback failed: {e}")
+        return None
+
+
+def _invoke_with_fallback(llm, messages, tools: list | None = None, tier: str = "mid"):
+    """Invoke LLM; on OpenRouter rate-limit, cascade down model tiers.
+
+    Order: same-tier → mid-tier → low/free-tier (OpenRouter) → GPU Ollama (final net).
+    GPU is reserved for embeddings + low-tier safety-net only.
     """
     from config import get_settings
 
     settings = get_settings()
-    gpu_model = settings.gpu_llm_model
+    current_model = getattr(llm, "model_name", "")
+    fallback_chain = _get_cascading_fallbacks(current_model, tier)
+    streaming = getattr(llm, "streaming", True)
 
-    # If circuit is open (tripped + within cooldown), skip straight to fallback
-    if _circuit_is_open() and gpu_model:
-        fallback_llm = ChatOpenAI(
-            model=gpu_model,
-            base_url=f"{settings.gpu_llm_url}/v1",
-            api_key="not-needed",
-            streaming=getattr(llm, "streaming", True),
-        )
-        if tools:
-            fallback_llm = fallback_llm.bind_tools(tools)
-        return fallback_llm.invoke(messages)
-
-    try:
-        return llm.invoke(messages)
-    except Exception as e:
-        if _is_rate_limit_error(e) and settings.gpu_llm_enabled:
-            _trip_circuit()
-            logger.warning(f"OpenRouter blocked ({e}). Retrying with GPU model {gpu_model} ...")
+    # If circuit is open, jump straight to fallbacks
+    if _circuit_is_open():
+        for fallback_id in fallback_chain:
+            logger.info(f"Circuit open — trying fallback model {fallback_id}")
             fallback_llm = ChatOpenAI(
-                model=gpu_model,
-                base_url=f"{settings.gpu_llm_url}/v1",
-                api_key="not-needed",
-                streaming=getattr(llm, "streaming", True),
+                model=fallback_id,
+                base_url="https://openrouter.ai/api/v1",
+                api_key=settings.openrouter_api_key,
+                streaming=streaming,
+                default_headers={
+                    "HTTP-Referer": "https://github.com/pi-agent",
+                    "X-Title": "pi-agent",
+                },
             )
             if tools:
                 fallback_llm = fallback_llm.bind_tools(tools)
             try:
-                result = fallback_llm.invoke(messages)
-                logger.info(f"GPU fallback succeeded with {gpu_model}")
-                return result
+                return fallback_llm.invoke(messages)
             except Exception as e2:
-                logger.error(f"GPU fallback also failed: {e2}")
-                raise e2 from e
+                logger.warning(f"Fallback {fallback_id} failed: {e2}")
+                continue
+        # Final safety net: GPU Ollama
+        gpu_result = _try_gpu_fallback(messages, tools, streaming)
+        if gpu_result is not None:
+            return gpu_result
+
+    try:
+        return llm.invoke(messages)
+    except Exception as e:
+        if _is_rate_limit_error(e):
+            _trip_circuit()
+            logger.warning(f"OpenRouter blocked ({e}). Cascading through fallback chain ...")
+            for fallback_id in fallback_chain:
+                logger.info(f"Retrying with fallback model {fallback_id}")
+                fallback_llm = ChatOpenAI(
+                    model=fallback_id,
+                    base_url="https://openrouter.ai/api/v1",
+                    api_key=settings.openrouter_api_key,
+                    streaming=streaming,
+                    default_headers={
+                        "HTTP-Referer": "https://github.com/pi-agent",
+                        "X-Title": "pi-agent",
+                    },
+                )
+                if tools:
+                    fallback_llm = fallback_llm.bind_tools(tools)
+                try:
+                    result = fallback_llm.invoke(messages)
+                    logger.info(f"Fallback succeeded with {fallback_id}")
+                    return result
+                except Exception as e2:
+                    logger.warning(f"Fallback {fallback_id} failed: {e2}")
+                    continue
+            # Final safety net: GPU Ollama
+            gpu_result = _try_gpu_fallback(messages, tools, streaming)
+            if gpu_result is not None:
+                return gpu_result
+            logger.error("All OpenRouter fallback models exhausted; GPU fallback also failed")
         raise
 
 
@@ -945,7 +1020,7 @@ def make_agent_node(db_url: str):
                     )
                 )
             ]
-            response = _invoke_with_fallback(llm_with_tools, messages, tools=selected_tools)
+            response = _invoke_with_fallback(llm_with_tools, messages, tools=selected_tools, tier=tier)
             # Strip any tool calls from the response to force termination
             if hasattr(response, "tool_calls") and response.tool_calls:
                 response = AIMessage(content=response.content or "I've gathered sufficient information. Based on my research: " + str(response.content))
@@ -969,7 +1044,7 @@ def make_agent_node(db_url: str):
         messages = [SystemMessage(prompt)] + state["messages"]
         if guardrail_notice:
             messages.append(HumanMessage(content=guardrail_notice))
-        response = _invoke_with_fallback(llm_with_tools, messages, tools=selected_tools)
+        response = _invoke_with_fallback(llm_with_tools, messages, tools=selected_tools, tier=tier)
 
         # Enforce real execution for analysis requests: no "text-only" completion
         # if no analysis execution tool has been called yet.
@@ -992,6 +1067,7 @@ def make_agent_node(db_url: str):
                     )
                 ],
                 tools=selected_tools,
+                tier=tier,
             )
             if _response_calls_analysis_tool(forced):
                 response = forced
