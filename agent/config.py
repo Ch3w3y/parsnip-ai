@@ -20,6 +20,7 @@ MODEL_ALIASES = {
         "qwen/qwen-turbo",
     ],
     "smart": [
+        "moonshotai/kimi-k2-6",
         "google/gemini-2.0-flash-001",
         "qwen/qwen3.6-plus",
         "qwen/qwen3-235b-a22b-2507",

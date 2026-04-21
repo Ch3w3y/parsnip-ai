@@ -225,14 +225,14 @@ async def main():
     # Joplin sync is now handled by joplin_watcher.py (polls every 30s, triggers on change)
     # Safety fallback: run every 6h in case watcher misses something
     scheduler.add_job(run_joplin, CronTrigger(hour="*/6"), id="joplin_safety")
-    # Daily KB backup at 01:00 UTC (before ingestion jobs)
-    scheduler.add_job(run_backup, CronTrigger(hour=1, minute=0), id="kb_backup")
+    # KB backups 4x daily at 00:00, 06:00, 12:00, 18:00 UTC
+    scheduler.add_job(run_backup, CronTrigger(hour="0,6,12,18", minute=0), id="kb_backup")
 
     scheduler.start()
     logger.info(
         "Scheduler started. Jobs: news=daily@06:00 | arxiv=Mon@03:00 | "
         "biorxiv=Tue@03:00 | wikipedia=Sun@02:00 | forex=daily@07:00 | "
-        "world_bank=Sun@04:00 | joplin_safety=every 6h UTC | backup=daily@01:00 UTC"
+        "world_bank=Sun@04:00 | joplin_safety=every 6h UTC | backup=4x daily UTC"
     )
     logger.info(
         "Wikipedia updates are gated — will not run until dump seed is marked done in ingestion_jobs."

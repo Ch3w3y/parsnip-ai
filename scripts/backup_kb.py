@@ -40,8 +40,6 @@ def export_table_to_parquet(conn, table: str, columns: list[str], output_path: P
 
     col_str = ", ".join(columns)
     query = f"SELECT {col_str} FROM {table}"
-    if table == "knowledge_chunks":
-        query += " WHERE embedding IS NOT NULL"
 
     logger.info(f"Exporting {table}...")
     df = pd.read_sql(query, conn)
@@ -66,6 +64,10 @@ def export_table_to_parquet(conn, table: str, columns: list[str], output_path: P
             if sample.apply(lambda x: isinstance(x, (dict, list))).any():
                 df[col] = df[col].apply(lambda x: _json.dumps(x) if x is not None else None)
 
+    # Convert pgvector embedding arrays to list<float> for Parquet compatibility
+    if "embedding" in df.columns:
+        df["embedding"] = df["embedding"].apply(lambda x: list(x) if x is not None else None)
+
     df.to_parquet(output_path, engine="pyarrow", compression="snappy", index=False)
     size_mb = output_path.stat().st_size / (1024 * 1024)
     logger.info(f"  Written to {output_path} ({size_mb:.1f} MB)")
@@ -89,7 +91,7 @@ def backup_to_local(output_dir: Path) -> dict:
             conn,
             "knowledge_chunks",
             ["id", "source", "source_id", "chunk_index", "content", "metadata",
-             "embedding_model", "user_id", "created_at", "updated_at"],
+             "embedding", "embedding_model", "user_id", "created_at", "updated_at"],
             kb_path,
         )
 
