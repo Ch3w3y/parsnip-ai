@@ -434,20 +434,27 @@ def _is_rate_limit_error(e: Exception) -> bool:
     return any(c in msg for c in codes)
 
 
-def _invoke_with_fallback(llm, messages, fallback_model: str | None = None):
-    """Invoke LLM; on OpenRouter rate-limit, rebuild with GPU and retry once."""
+def _invoke_with_fallback(llm, messages, tools: list | None = None):
+    """Invoke LLM; on OpenRouter rate-limit, rebuild with GPU and retry once.
+
+    Preserves tool bindings on fallback by re-calling bind_tools(...) when
+    the original LLM was already tool-bound.
+    """
     from config import get_settings
 
     settings = get_settings()
+    gpu_model = settings.gpu_llm_model
 
     # If circuit is open (tripped + within cooldown), skip straight to fallback
-    if _circuit_is_open() and fallback_model:
+    if _circuit_is_open() and gpu_model:
         fallback_llm = ChatOpenAI(
-            model=fallback_model,
+            model=gpu_model,
             base_url=f"{settings.gpu_llm_url}/v1",
             api_key="not-needed",
             streaming=getattr(llm, "streaming", True),
         )
+        if tools:
+            fallback_llm = fallback_llm.bind_tools(tools)
         return fallback_llm.invoke(messages)
 
     try:
@@ -455,7 +462,6 @@ def _invoke_with_fallback(llm, messages, fallback_model: str | None = None):
     except Exception as e:
         if _is_rate_limit_error(e) and settings.gpu_llm_enabled:
             _trip_circuit()
-            gpu_model = fallback_model or settings.gpu_llm_model
             logger.warning(f"OpenRouter blocked ({e}). Retrying with GPU model {gpu_model} ...")
             fallback_llm = ChatOpenAI(
                 model=gpu_model,
@@ -463,6 +469,8 @@ def _invoke_with_fallback(llm, messages, fallback_model: str | None = None):
                 api_key="not-needed",
                 streaming=getattr(llm, "streaming", True),
             )
+            if tools:
+                fallback_llm = fallback_llm.bind_tools(tools)
             try:
                 result = fallback_llm.invoke(messages)
                 logger.info(f"GPU fallback succeeded with {gpu_model}")
@@ -937,7 +945,7 @@ def make_agent_node(db_url: str):
                     )
                 )
             ]
-            response = _invoke_with_fallback(llm_with_tools, messages)
+            response = _invoke_with_fallback(llm_with_tools, messages, tools=selected_tools)
             # Strip any tool calls from the response to force termination
             if hasattr(response, "tool_calls") and response.tool_calls:
                 response = AIMessage(content=response.content or "I've gathered sufficient information. Based on my research: " + str(response.content))
@@ -961,7 +969,7 @@ def make_agent_node(db_url: str):
         messages = [SystemMessage(prompt)] + state["messages"]
         if guardrail_notice:
             messages.append(HumanMessage(content=guardrail_notice))
-        response = _invoke_with_fallback(llm_with_tools, messages)
+        response = _invoke_with_fallback(llm_with_tools, messages, tools=selected_tools)
 
         # Enforce real execution for analysis requests: no "text-only" completion
         # if no analysis execution tool has been called yet.
@@ -982,7 +990,8 @@ def make_agent_node(db_url: str):
                             "Do not call search tools or provide a narrative-only answer."
                         )
                     )
-                ]
+                ],
+                tools=selected_tools,
             )
             if _response_calls_analysis_tool(forced):
                 response = forced

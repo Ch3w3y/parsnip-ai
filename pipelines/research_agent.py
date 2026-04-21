@@ -158,7 +158,7 @@ class Pipeline:
             enriched = self._enrich_with_joplin(full_text)
             if enriched != full_text:
                 # Yield the appended content separator and note body
-                yield f"\n\n---\n\n*{full_text}*"
+                yield f"\n\n---\n\n{enriched}"
 
             if self.valves.AUTO_SAVE_SESSIONS and self._tools_used:
                 try:

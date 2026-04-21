@@ -129,7 +129,14 @@ def send_prompt_via_pipeline(prompt: str) -> dict:
 
 
 def check_joplin_notes() -> list:
-    """Check for notes in the Research Outputs notebook."""
+    """Check for notes in the Research Outputs notebook.
+
+    Parses the markdown format returned by joplin_search_notes:
+      ## Note Title
+      `note_id`
+      content...
+      ---
+    """
     try:
         r = requests.post(
             f"{JOPLIN_MCP_URL}/tools/joplin_search_notes",
@@ -141,8 +148,8 @@ def check_joplin_notes() -> list:
         result_text = data.get("result", "")
         notes = []
         for line in result_text.split("\n"):
-            if line.startswith("- **"):
-                title = line.replace("- **", "").split("**")[0]
+            if line.startswith("## "):
+                title = line[3:].strip()
                 notes.append(title)
         return notes
     except Exception as e:
