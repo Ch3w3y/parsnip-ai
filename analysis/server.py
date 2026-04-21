@@ -48,11 +48,20 @@ from storage.gcs import GCSClient
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-OUTPUT_DIR = Path("/app/output")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+def _ensure_dir(path: Path) -> Path:
+    """Create directory if possible, else fall back to a temp directory."""
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    except (OSError, PermissionError):
+        fallback = Path(tempfile.gettempdir()) / path.name
+        fallback.mkdir(parents=True, exist_ok=True)
+        logger.warning(f"Could not create {path}, using fallback {fallback}")
+        return fallback
 
-SCHEDULES_DIR = Path("/app/schedules")
-SCHEDULES_DIR.mkdir(parents=True, exist_ok=True)
+
+OUTPUT_DIR = _ensure_dir(Path(os.environ.get("OUTPUT_DIR", "/app/output")))
+SCHEDULES_DIR = _ensure_dir(Path(os.environ.get("SCHEDULES_DIR", "/app/schedules")))
 JOBS_FILE = SCHEDULES_DIR / "jobs.json"
 
 scheduler = AsyncIOScheduler()
