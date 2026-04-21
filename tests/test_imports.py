@@ -133,4 +133,8 @@ class TestJoplinMcpImports:
         )
         assert spec is not None
         module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+        except ImportError:
+            pass  # missing runtime deps (asyncpg, mcp) in CI is expected
         assert hasattr(module, "main")
