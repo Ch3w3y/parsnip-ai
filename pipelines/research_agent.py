@@ -25,7 +25,7 @@ class Pipeline:
         JOPLIN_MCP_URL: str = "http://localhost:8090"
         SHOW_TOOL_CALLS: bool = True
         SHOW_TOOL_OUTPUTS: bool = False
-        REQUEST_TIMEOUT: int = 300
+        REQUEST_TIMEOUT: int = 600
         DEBUG: bool = False
         AUTO_SAVE_SESSIONS: bool = False
 

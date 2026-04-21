@@ -153,10 +153,12 @@ def check_joplin_notes() -> list:
         data = r.json()
         result_text = data.get("result", "")
         notes = []
-        for line in result_text.split("\n"):
-            if line.startswith("## "):
-                title = line[3:].strip()
-                notes.append(title)
+        blocks = result_text.split("\n\n---\n")
+        for block in blocks:
+            for line in block.strip().split("\n"):
+                if line.startswith("## "):
+                    notes.append(line[3:].strip())
+                    break  # only first ## per block is the note title
         return notes
     except Exception as e:
         return [f"Error checking Joplin: {e}"]
