@@ -42,6 +42,10 @@ services:
   # deliberately converts 'localhost'/'127.0.0.1' to 'host.docker.internal' in Docker.
   joplin-server:
     # Pinned to tested digest — update only after verifying new image
+    # NOTE: JOPLIN_SERVER_ADMIN_EMAIL is only read on FIRST startup with an
+    # empty database. If you recreate postgres, run ./scripts/fix-joplin-admin.sh
+    # to sync the admin email back to your .env value.
+    # SECURITY: Change JOPLIN_ADMIN_PASSWORD from the default before production.
     image: joplin/server:latest@sha256:5d9e7f9d31b436cb1b99d1a6a65d8c5bf760829094617e8ad1e956fd925de888
     container_name: pi_agent_joplin
     restart: unless-stopped
