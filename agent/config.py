@@ -23,10 +23,10 @@ MODEL_ALIASES = {
         "nvidia/nemotron-3-super-120b-a12b:free",
     ],
     "reasoning": [
-        "moonshotai/kimi-k2.6",
+        "kimi-k2.6:cloud",
     ],
     "graph": [
-        "moonshotai/kimi-k2.6",
+        "kimi-k2.6:cloud",
     ],
     "classifier": [
         "qwen/qwen2.5-3b-instruct",
@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     database_url: str
     openrouter_api_key: str
     ollama_base_url: str = "http://host.docker.internal:11434"
+    ollama_api_key: str = ""  # For Ollama Cloud
+    ollama_cloud_url: str = "https://ollama.com/v1"
     embed_model: str = "mxbai-embed-large"
 
     # LLM routing — use alias names (fast/smart/reasoning) or raw provider IDs
