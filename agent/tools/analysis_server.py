@@ -33,7 +33,62 @@ def _normalize_code(code) -> str:
     return str(code)
 
 
+def _strict_requirement_requested(user_request: str) -> bool:
+    """Return True when the user explicitly forbids fallback/substitution."""
+    lower = user_request.lower()
+    strict_markers = [
+        "exact",
+        "exactly",
+        "required identifier",
+        "required indicator",
+        "required source",
+        "mandatory",
+        "must use",
+        "only use",
+        "no fallback",
+        "without fallback",
+        "do not substitute",
+        "don't substitute",
+        "do not use a substitute",
+        "strict",
+    ]
+    return any(marker in lower for marker in strict_markers)
+
+
+def _preflight_feedback(
+    kind: str,
+    missing: list[str],
+    detail: str,
+    *,
+    hard_stop: bool = False,
+    options: list[str] | None = None,
+) -> str:
+    status = "error" if hard_stop else "needs_decision"
+    payload = {
+        "status": status,
+        "kind": kind,
+        "missing": missing,
+        "detail": detail,
+        "hard_stop": hard_stop,
+        "message": (
+            "Required identifiers are missing and the analysis was not executed."
+            if hard_stop
+            else "Preflight found missing or mismatched requirements. The model can revise the plan, choose a defensible fallback, ask the user, or explain the limitation."
+        ),
+        "options": options
+        or [
+            "Revise the script or query to use available data.",
+            "Ask the user whether a fallback or proxy is acceptable.",
+            "Explain that the requested analysis cannot be run with the current data.",
+        ],
+    }
+    if hard_stop:
+        payload["error_type"] = "fail_fast_missing_requirements"
+    return json.dumps(payload)
+
+
 def _fail_fast_error(kind: str, missing: list[str], detail: str) -> str:
+    """Backward-compatible hard-stop error shape for strict requirements."""
     return json.dumps(
         {
             "status": "error",
@@ -41,6 +96,7 @@ def _fail_fast_error(kind: str, missing: list[str], detail: str) -> str:
             "kind": kind,
             "missing": missing,
             "detail": detail,
+            "hard_stop": True,
             "message": (
                 "Required identifiers are missing from the knowledge base. "
                 "Analysis was not executed to avoid costly fallback runs."
@@ -63,15 +119,22 @@ async def _preflight_required_identifiers(code: str, description: str = "") -> s
     text = f"{user_request}\n{description}\n{code}"
     lower = text.lower()
     request_lower = user_request.lower()
+    hard_stop = _strict_requirement_requested(user_request)
 
     # Enforce required source usage contracts from the user request.
     if "world bank" in request_lower and "world_bank_data" not in lower:
-        return _fail_fast_error(
+        return _preflight_feedback(
             kind="required_source_missing",
             missing=["world_bank_data"],
             detail=(
                 "User requested World Bank data, but the script does not query world_bank_data."
             ),
+            hard_stop=hard_stop,
+            options=[
+                "Revise the script to query world_bank_data.",
+                "Ask whether another macro data source is acceptable.",
+                "Explain that World Bank-specific analysis needs world_bank_data access.",
+            ],
         )
 
     # World Bank indicator codes
@@ -109,12 +172,18 @@ async def _preflight_required_identifiers(code: str, description: str = "") -> s
                 found = {row[0] async for row in cur}
         missing = [c for c in resolved_codes if c not in found]
         if missing:
-            return _fail_fast_error(
+            return _preflight_feedback(
                 kind="world_bank_indicator_code",
                 missing=missing,
                 detail=(
-                    "Do not substitute with 'closest available' indicators unless the user explicitly approves."
+                    "The requested World Bank indicator code was not found in world_bank_data."
                 ),
+                hard_stop=hard_stop,
+                options=[
+                    "Search available World Bank indicators for a close match and ask before using it.",
+                    "Revise the analysis to omit the missing indicator.",
+                    "Explain that the exact indicator is unavailable in the current structured table.",
+                ],
             )
 
         # If countries are explicitly specified in user request/script, require data coverage
@@ -152,13 +221,19 @@ async def _preflight_required_identifiers(code: str, description: str = "") -> s
                     if observed.get((cc, ic), 0) <= 0:
                         missing_pairs.append(f"{cc}:{ic}")
             if missing_pairs:
-                return _fail_fast_error(
+                return _preflight_feedback(
                     kind="world_bank_country_indicator_coverage",
                     missing=missing_pairs,
                     detail=(
                         "At least one required indicator has no non-null data for a requested country. "
-                        "Do not substitute indicators or countries without explicit user approval."
+                        "Coverage is incomplete for the requested country/indicator pair."
                     ),
+                    hard_stop=hard_stop,
+                    options=[
+                        "Ask whether to use a nearby year, country group, or proxy indicator.",
+                        "Revise the analysis to cover only pairs with non-null data.",
+                        "Explain which requested pairs are unavailable.",
+                    ],
                 )
 
     # Forex pairs
@@ -173,10 +248,16 @@ async def _preflight_required_identifiers(code: str, description: str = "") -> s
                 found_pairs = {row[0] async for row in cur}
         missing_pairs = [p for p in fx_pairs if p not in found_pairs]
         if missing_pairs:
-            return _fail_fast_error(
+            return _preflight_feedback(
                 kind="forex_pair",
                 missing=missing_pairs,
-                detail="Do not substitute currency pairs unless the user explicitly approves.",
+                detail="The requested FX pair was not found in forex_rates.",
+                hard_stop=hard_stop,
+                options=[
+                    "Check whether the inverse pair is available and ask before using it.",
+                    "Revise the analysis to available FX pairs.",
+                    "Explain that the requested pair is unavailable in the current structured table.",
+                ],
             )
 
     return None
