@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="280" viewBox="0 0 960 280" role="img" aria-label="parsnip-ai logo">
+  <defs>
+    <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#23c0a8"/>
+      <stop offset="100%" stop-color="#2f6cff"/>
+    </linearGradient>
+  </defs>
+  <rect width="960" height="280" fill="#0b0f1a"/>
+  <g transform="translate(54,44)">
+    <rect x="0" y="0" width="192" height="192" rx="20" fill="url(#g)"/>
+    <path d="M52 124c18 0 28-11 28-29 0-16-10-27-28-27H34v56h18Zm0-72c30 0 48 18 48 43 0 27-18 45-48 45H34v28H14V52h38Z" fill="#fff"/>
+    <circle cx="148" cy="74" r="10" fill="#fff"/>
+    <circle cx="148" cy="106" r="10" fill="#fff"/>
+    <circle cx="148" cy="138" r="10" fill="#fff"/>
+  </g>
+  <g transform="translate(278,74)">
+    <text x="0" y="62" fill="#f5f7ff" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="72" font-weight="700">parsnip-ai</text>
+    <text x="0" y="118" fill="#9fb3c8" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="28">Grounded research and analysis stack</text>
+  </g>
+</svg>

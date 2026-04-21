@@ -1,5 +1,7 @@
 # parsnip-ai
 
+![parsnip-ai logo](docs/branding/logo.svg)
+
 Open source research and analysis platform with:
 - a tool-using backend agent service,
 - persistent memory and vector retrieval in PostgreSQL/pgvector,
@@ -7,7 +9,7 @@ Open source research and analysis platform with:
 - OpenWebUI integration for chat operations,
 - optional Python/R analysis execution.
 
-> Logo asset path: `docs/branding/logo.png` (drop-in file for GitHub/social previews).
+> Primary logo asset path: `docs/branding/logo.svg` (`logo.png` optional override).
 
 ## Why This Stack
 
