@@ -31,7 +31,12 @@
 
 ```bash
 cp .env.example .env
+
+# Build locally (dev / hacking)
 docker compose up -d --build
+
+# Or pull pre-built release images (faster)
+IMAGE_TAG=0.1.0 docker compose up -d --no-build
 ```
 
 Default endpoints:

@@ -2,11 +2,28 @@
 
 ## Local Docker Deployment (Baseline)
 
+### Option A: Build locally
+
 ```bash
 cp .env.example .env
 docker compose up -d --build
 docker compose ps
 ```
+
+### Option B: Pull pre-built images from GHCR
+
+```bash
+cp .env.example .env
+IMAGE_TAG=0.1.0 docker compose up -d --no-build
+docker compose ps
+```
+
+Pre-built images are published to `ghcr.io/ch3w3y/parsnip-ai/*` for every release.
+Available tags: `latest`, `0.1.0`, `0.1`, `0`, plus short-SHA.
+
+> **Note:** The `analysis` image is `linux/amd64` only because the upstream
+> `rocker/tidyverse` base does not publish an `arm64` manifest. All other
+> services support both `amd64` and `arm64`.
 
 Verify:
 - OpenWebUI: `http://localhost:3000`
@@ -44,5 +61,6 @@ Supported practical patterns:
 
 - Keep `.env` out of git; inject via secure secret channel.
 - Enforce regular backup + restore drills.
-- Pin image tags for reproducible upgrades.
+- Pin image tags for reproducible upgrades (e.g. `IMAGE_TAG=0.1.0`).
+- Pull from GHCR in production instead of building on the host.
 - Run secret scan before every release.
