@@ -4,7 +4,7 @@ import uuid
 import time
 import sys
 
-PIPELINE_URL = "http://localhost:9099/chat/completions"
+PIPELINE_URL = "http://localhost:9099/v1/chat/completions"
 HEADERS = {
     "Content-Type": "application/json",
     "Authorization": "Bearer owui-pipeline-key"

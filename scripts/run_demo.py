@@ -84,10 +84,16 @@ SCENARIOS = {
 }
 
 
-def send_prompt(prompt: str) -> str:
+def send_prompt(prompt: str, chat_id: str) -> str:
     r = requests.post(
         PIPELINE_URL,
-        json={"model": "research_agent", "messages": [{"role": "user", "content": prompt}], "stream": False},
+        json={
+            "model": "research_agent",
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+            "chat_id": chat_id,
+            "metadata": {"chat_id": chat_id},
+        },
         headers={"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"},
         timeout=300,
     )
@@ -101,8 +107,9 @@ def run_scenario(key: str, scenario: dict):
     print(f"{'='*70}")
     print(f"Prompt: {scenario['prompt'][:120]}...")
 
+    chat_id = f"demo-{key}-{int(time.time())}"
     start = time.time()
-    content = send_prompt(scenario["prompt"])
+    content = send_prompt(scenario["prompt"], chat_id)
     elapsed = time.time() - start
 
     # Metrics
