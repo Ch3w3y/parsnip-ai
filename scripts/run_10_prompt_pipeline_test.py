@@ -192,14 +192,8 @@ def run_test():
             "response": response,
             "timestamp": datetime.now().isoformat(),
         }
-        
-        # Save individual result
-        out_path = os.path.join(OUTPUT_DIR, f"research_pipeline_test_{num:02d}.json")
-        with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(result, f, ensure_ascii=False, indent=2)
-        print(f"[{datetime.now().isoformat()}] Response saved to {out_path} ({elapsed:.1f}s)")
-        
-        # Check Joplin for new notes
+
+        # Check Joplin for new notes BEFORE saving artifact
         joplin_after = set(check_joplin_notes())
         new_notes = joplin_after - joplin_before
         joplin_before = joplin_after
@@ -208,6 +202,12 @@ def run_test():
             print(f"[{datetime.now().isoformat()}] New Joplin notes: {new_notes}")
         else:
             print(f"[{datetime.now().isoformat()}] No new Joplin notes detected")
+
+        # Save individual result (now includes joplin_new_notes)
+        out_path = os.path.join(OUTPUT_DIR, f"research_pipeline_test_{num:02d}.json")
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        print(f"[{datetime.now().isoformat()}] Response saved to {out_path} ({elapsed:.1f}s)")
         
         results.append(result)
         
