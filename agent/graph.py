@@ -162,6 +162,13 @@ Safety and execution boundaries:
 - If code execution fails, use the error output to fix the next attempt. Avoid
   repeating identical tool calls or rewrites without a new hypothesis.
 - Cite source titles and links for research claims when tools provide them.
+
+Joplin execution rule:
+- When the user explicitly asks you to save, store, or create a note in Joplin,
+  you MUST call the appropriate Joplin tool (`joplin_create_note`,
+  `joplin_update_note`, etc.) as a real tool call. A text-only response claiming
+  the note was saved is NOT sufficient. After creating the note, return the
+  note title and a `joplin://` deep-link in your final answer.
 """
 
 TOOLS = [
@@ -373,6 +380,78 @@ async def _load_l1_memory(thread_id: str, db_url: str) -> str:
     return "\n".join(lines)
 
 
+# ── Circuit breaker for OpenRouter rate-limit / quota exhaustion ───────────
+# When OpenRouter returns 403 (key limit), 429 (rate limit), or 402 (payment),
+# we automatically fallback to GPU Ollama for a cooldown period.
+import threading
+
+_OPENROUTER_TRIPPED = False
+_OPENROUTER_LOCK = threading.Lock()
+_OPENROUTER_COOLDOWN_MINUTES = 5
+
+
+def _trip_circuit():
+    global _OPENROUTER_TRIPPED
+    with _OPENROUTER_LOCK:
+        _OPENROUTER_TRIPPED = True
+    logger.warning("OpenRouter circuit breaker TRIPPED — falling back to GPU Ollama")
+
+
+def _reset_circuit():
+    global _OPENROUTER_TRIPPED
+    with _OPENROUTER_LOCK:
+        _OPENROUTER_TRIPPED = False
+    logger.info("OpenRouter circuit breaker RESET")
+
+
+def _is_rate_limit_error(e: Exception) -> bool:
+    """Detect OpenRouter rate-limit / quota errors from langchain/openai exceptions."""
+    msg = str(e).lower()
+    codes = ["403", "429", "402", "key limit exceeded", "rate limit", "quota",
+             "insufficient_quota", "payment_required", "limit exceeded"]
+    return any(c in msg for c in codes)
+
+
+def _invoke_with_fallback(llm, messages, fallback_model: str | None = None):
+    """Invoke LLM; on OpenRouter rate-limit, rebuild with GPU and retry once."""
+    global _OPENROUTER_TRIPPED
+    from config import get_settings
+
+    settings = get_settings()
+
+    # If circuit is already tripped, skip straight to fallback
+    if _OPENROUTER_TRIPPED and fallback_model:
+        fallback_llm = ChatOpenAI(
+            model=fallback_model,
+            base_url=f"{settings.gpu_llm_url}/v1",
+            api_key="not-needed",
+            streaming=getattr(llm, "streaming", True),
+        )
+        return fallback_llm.invoke(messages)
+
+    try:
+        return llm.invoke(messages)
+    except Exception as e:
+        if _is_rate_limit_error(e) and settings.gpu_llm_enabled:
+            _trip_circuit()
+            gpu_model = fallback_model or settings.gpu_llm_model
+            logger.warning(f"OpenRouter blocked ({e}). Retrying with GPU model {gpu_model} ...")
+            fallback_llm = ChatOpenAI(
+                model=gpu_model,
+                base_url=f"{settings.gpu_llm_url}/v1",
+                api_key="not-needed",
+                streaming=getattr(llm, "streaming", True),
+            )
+            try:
+                result = fallback_llm.invoke(messages)
+                logger.info(f"GPU fallback succeeded with {gpu_model}")
+                return result
+            except Exception as e2:
+                logger.error(f"GPU fallback also failed: {e2}")
+                raise e2 from e
+        raise
+
+
 def _get_llm(model: str | None = None, streaming: bool = True) -> ChatOpenAI:
     from config import get_settings
 
@@ -421,7 +500,7 @@ def _get_llm(model: str | None = None, streaming: bool = True) -> ChatOpenAI:
 TOOL_CALL_BUDGETS = {
     "low": 10,
     "mid": 20,
-    "high": 35,
+    "high": 45,
 }
 SAME_TOOL_REPEAT_LIMIT = 5  # repeated same tool with identical args
 SAME_TOOL_REPEAT_LIMITS = {
@@ -837,7 +916,7 @@ def make_agent_node(db_url: str):
                     )
                 )
             ]
-            response = llm_with_tools.invoke(messages)
+            response = _invoke_with_fallback(llm_with_tools, messages)
             # Strip any tool calls from the response to force termination
             if hasattr(response, "tool_calls") and response.tool_calls:
                 response = AIMessage(content=response.content or "I've gathered sufficient information. Based on my research: " + str(response.content))
@@ -861,7 +940,7 @@ def make_agent_node(db_url: str):
         messages = [SystemMessage(prompt)] + state["messages"]
         if guardrail_notice:
             messages.append(HumanMessage(content=guardrail_notice))
-        response = llm_with_tools.invoke(messages)
+        response = _invoke_with_fallback(llm_with_tools, messages)
 
         # Enforce real execution for analysis requests: no "text-only" completion
         # if no analysis execution tool has been called yet.
@@ -870,7 +949,8 @@ def make_agent_node(db_url: str):
             if _response_calls_analysis_tool(response):
                 return {"messages": [response], "_write_tracker": write_tracker, "_tool_call_tracker": tool_tracker}
 
-            forced = llm_with_tools.invoke(
+            forced = _invoke_with_fallback(
+                llm_with_tools,
                 messages
                 + [
                     HumanMessage(

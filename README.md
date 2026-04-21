@@ -62,7 +62,54 @@ It is built for teams that want full control over models, data, and deployment.
 - Grounded generation via explicit ingestion and traceable sources.
 - Agentic memory + retrieval in one cohesive stack.
 - Pluggable data onboarding: APIs, notes, markdown, PDFs, and domain-specific connectors.
+- **Hybrid RAG** — synthesizes live web search with curated knowledge base grounding (see below).
 - Configurable model routing through `.env` (OpenRouter, OpenAI-compatible endpoints, local/remote Ollama embeddings).
+
+## Hybrid RAG: Web + KB Synthesis
+
+Unlike traditional RAG that only retrieves from a static corpus, `parsnip-ai` performs **live web search** and **knowledge base grounding** in the same request, then synthesizes cross-source reports with explicit provenance.
+
+### Example: Space Exploration Report
+
+**Prompt:** "Search the web for latest space news (2025-2026), then search the KB for Apollo/NASA history. Synthesize a grounded report."
+
+**Output excerpt:**
+
+> **Historical Context:** The Space Race was ignited by the Soviet Union's launch of *Sputnik 1* in 1957, leading to NASA's creation in 1958 **[Source: Apollo 11 KB]**.
+>
+> **Current Developments:** Artemis 1 tested uncrewed SLS/Orion; crewed missions face spacesuit/HLS delays **[Source: Web Search]**. In February 2026, SpaceX integrated xAI to accelerate AI-driven rocketry **[Source: SpaceX Updates]**.
+>
+> **Synthesis:** Apollo proved lunar travel was possible; Artemis now aims to make it sustainable, using public-private partnerships to establish long-term lunar presence **[Source: NASA News]**.
+
+### Architecture
+
+```
+User Prompt
+    |
+    v
+[Web Search]  --->  Real-time articles, news, papers (2025-2026)
+    |                    |
+    |                    v
+[KB Search]   --->  Wikipedia grounding, historical context
+    |                    |
+    v                    v
+[Synthesis Node]  --->  Markdown report with [Source: X] tags
+    |
+    v
+[Joplin Export]  --->  Persistent note + joplin:// deep-link
+```
+
+### Try It Yourself
+
+```bash
+# Run the curated demo scenarios
+python scripts/run_demo.py
+
+# Or run a single scenario
+python scripts/run_demo.py --scenario space_exploration
+```
+
+See [docs/HYBRID_RAG.md](docs/HYBRID_RAG.md) for the full capabilities showcase.
 
 ## Joplin Notebook Sync Pipeline
 
