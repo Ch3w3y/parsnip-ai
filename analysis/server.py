@@ -49,10 +49,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 OUTPUT_DIR = Path("/app/output")
-OUTPUT_DIR.mkdir(exist_ok=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 SCHEDULES_DIR = Path("/app/schedules")
-SCHEDULES_DIR.mkdir(exist_ok=True)
+SCHEDULES_DIR.mkdir(parents=True, exist_ok=True)
 JOBS_FILE = SCHEDULES_DIR / "jobs.json"
 
 scheduler = AsyncIOScheduler()
