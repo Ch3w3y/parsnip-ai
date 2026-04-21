@@ -126,11 +126,11 @@ def check_joplin_notes() -> list:
         r.raise_for_status()
         data = r.json()
         result_text = data.get("result", "")
-        # Parse markdown list of notes
+        # Parse markdown blocks: ## Title\n`id`\ncontent...\n---\n
         notes = []
         for line in result_text.split("\n"):
-            if line.startswith("- **"):
-                title = line.replace("- **", "").split("**")[0]
+            if line.startswith("## "):
+                title = line[3:].strip()
                 notes.append(title)
         return notes
     except Exception as e:
