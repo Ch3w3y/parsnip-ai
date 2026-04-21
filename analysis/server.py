@@ -87,6 +87,7 @@ DB_PORT = os.environ.get("DB_PORT", "5432")
 DB_NAME = os.environ.get("DB_NAME", "agent_kb")
 DB_USER = os.environ.get("DB_USER", "agent")
 DB_PASSWORD = os.environ.get("DB_PASSWORD", "[REDACTED]")
+EMBED_MODEL = os.environ.get("EMBED_MODEL", "mxbai-embed-large")
 
 # Git config
 GIT_EMAIL = os.environ.get("GIT_EMAIL", "agent@pi-agent.local")

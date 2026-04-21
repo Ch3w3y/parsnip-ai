@@ -1,0 +1,12 @@
+# Test dependencies — install with: pip install -r tests/requirements.txt
+pytest>=8.0
+httpx>=0.27
+requests>=2.31
+
+# Service deps needed for import smoke tests
+asyncpg>=0.29
+apscheduler>=3.10
+mcp>=1.0
+starlette>=0.40
+uvicorn>=0.32
+

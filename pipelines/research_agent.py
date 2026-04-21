@@ -46,7 +46,8 @@ class Pipeline:
         self._last_thread_id = thread_id
 
         if self.valves.DEBUG:
-            yield f"\n\n*[Debug: thread_id={thread_id}, chat_id={chat_id}, messages_in_context={len(messages)}]*\n\n"
+            msg_count = len(body.get("messages", []))
+            yield f"\n\n*[Debug: thread_id={thread_id}, chat_id={chat_id}, messages_in_context={msg_count}]*\n\n"
 
         payload = {
             "message": user_message,
