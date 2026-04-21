@@ -45,7 +45,8 @@ def get_joplin_notes() -> list[dict]:
             title = ""
             note_id = ""
             for line in lines:
-                if line.startswith("## "):
+                # Only the FIRST ## line is the note title; body subheadings are ignored
+                if line.startswith("## ") and not title:
                     title = line[3:].strip()
                 elif line.startswith("`") and line.endswith("`"):
                     note_id = line.strip("`")
