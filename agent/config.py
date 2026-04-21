@@ -139,17 +139,6 @@ class Settings(BaseSettings):
         alias = TIER_ALIASES.get(tier, "fast")
         return self.resolve_model(alias)
 
-    def resolve_tier_with_fallback(self, tier: str) -> str:
-        """Same as resolve_tier, but if OpenRouter is rate-limited,
-        aggressively fallback to GPU models when available."""
-        resolved = self.resolve_tier(tier)
-        # If we have GPU models available, use them for low/mid to save API credits
-        if tier in ("low", "mid") and self.gpu_llm_enabled:
-            return self.gpu_llm_model
-        if tier == "mid" and self.gpu_mid_enabled:
-            return self.gpu_mid_model
-        return resolved
-
     def is_gpu_model(self, model_id: str) -> bool:
         """Check if a model ID should be routed to GPU Ollama."""
         return self.gpu_llm_enabled and model_id in (self.gpu_llm_model, self.gpu_mid_model)

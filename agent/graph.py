@@ -13,6 +13,8 @@ Checkpointer: AsyncPostgresSaver — survives container restarts.
 import os
 import json
 import logging
+import threading
+import time
 import httpx
 from typing import Annotated
 
@@ -383,25 +385,45 @@ async def _load_l1_memory(thread_id: str, db_url: str) -> str:
 # ── Circuit breaker for OpenRouter rate-limit / quota exhaustion ───────────
 # When OpenRouter returns 403 (key limit), 429 (rate limit), or 402 (payment),
 # we automatically fallback to GPU Ollama for a cooldown period.
-import threading
 
 _OPENROUTER_TRIPPED = False
+_OPENROUTER_TRIPPED_AT: float | None = None
 _OPENROUTER_LOCK = threading.Lock()
-_OPENROUTER_COOLDOWN_MINUTES = 5
+_OPENROUTER_COOLDOWN_SECONDS = 300  # 5 minutes
 
 
 def _trip_circuit():
-    global _OPENROUTER_TRIPPED
+    global _OPENROUTER_TRIPPED, _OPENROUTER_TRIPPED_AT
     with _OPENROUTER_LOCK:
         _OPENROUTER_TRIPPED = True
+        _OPENROUTER_TRIPPED_AT = time.time()
     logger.warning("OpenRouter circuit breaker TRIPPED — falling back to GPU Ollama")
 
 
 def _reset_circuit():
-    global _OPENROUTER_TRIPPED
+    global _OPENROUTER_TRIPPED, _OPENROUTER_TRIPPED_AT
     with _OPENROUTER_LOCK:
         _OPENROUTER_TRIPPED = False
+        _OPENROUTER_TRIPPED_AT = None
     logger.info("OpenRouter circuit breaker RESET")
+
+
+def _circuit_is_open() -> bool:
+    """Check if circuit is tripped and cooldown has not expired."""
+    global _OPENROUTER_TRIPPED, _OPENROUTER_TRIPPED_AT
+    with _OPENROUTER_LOCK:
+        if not _OPENROUTER_TRIPPED:
+            return False
+        if _OPENROUTER_TRIPPED_AT is None:
+            return False
+        elapsed = time.time() - _OPENROUTER_TRIPPED_AT
+        if elapsed >= _OPENROUTER_COOLDOWN_SECONDS:
+            # Auto-reset after cooldown
+            _OPENROUTER_TRIPPED = False
+            _OPENROUTER_TRIPPED_AT = None
+            logger.info("OpenRouter circuit breaker auto-RESET after cooldown")
+            return False
+        return True
 
 
 def _is_rate_limit_error(e: Exception) -> bool:
@@ -414,13 +436,12 @@ def _is_rate_limit_error(e: Exception) -> bool:
 
 def _invoke_with_fallback(llm, messages, fallback_model: str | None = None):
     """Invoke LLM; on OpenRouter rate-limit, rebuild with GPU and retry once."""
-    global _OPENROUTER_TRIPPED
     from config import get_settings
 
     settings = get_settings()
 
-    # If circuit is already tripped, skip straight to fallback
-    if _OPENROUTER_TRIPPED and fallback_model:
+    # If circuit is open (tripped + within cooldown), skip straight to fallback
+    if _circuit_is_open() and fallback_model:
         fallback_llm = ChatOpenAI(
             model=fallback_model,
             base_url=f"{settings.gpu_llm_url}/v1",
