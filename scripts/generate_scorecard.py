@@ -57,31 +57,47 @@ def get_joplin_notes() -> list[dict]:
         return []
 
 
-def score_prompt(num: int, response_data: dict, joplin_notes: list[dict]) -> dict:
-    """Score a single prompt against the rubric."""
+def score_prompt(num: int, response_data: dict, joplin_notes: list[dict], joplin_before: list[dict]) -> dict:
+    """Score a single prompt against the rubric.
+
+    joplin_notes: current state of all notes
+    joplin_before: notes that existed BEFORE this test run started
+    """
     content = response_data.get("response", {}).get("content", "")
     error = response_data.get("response", {}).get("error", "")
-    
+
     # Criteria:
-    # [JOP] Joplin note created in "Research Outputs"
-    # [LANG] Response in correct language, idiomatic
+    # [JOP] Joplin note created in "Research Outputs" during THIS run
+    # [LANG] Response in correct language, non-empty, not an error payload
     # [QUAL] Output is professional, well-structured
     # [TOOLS] KB searched first, then analysis/Joplin chain
     # [VIS] (if applicable) PNG image pulled and dimensions verified
-    
+
     scores = {}
     details = {}
-    
-    # 1. Joplin output
+
+    # 1. Joplin output — only count notes newly created in this run
     expected_title = EXPECTED_NOTES.get(num, "")
-    found_note = any(expected_title.lower() in n["title"].lower() for n in joplin_notes)
-    scores["joplin"] = 1 if found_note else 0
-    details["joplin"] = f"Expected: '{expected_title}', Found: {[n['title'] for n in joplin_notes if expected_title.lower() in n['title'].lower()]}"
-    
-    # 2. Language
+    before_titles = {n["title"].lower() for n in joplin_before}
+    newly_created = [n for n in joplin_notes
+                     if expected_title.lower() in n["title"].lower()
+                     and n["title"].lower() not in before_titles]
+    scores["joplin"] = 1 if newly_created else 0
+    details["joplin"] = (
+        f"Expected: '{expected_title}', "
+        f"Newly created: {[n['title'] for n in newly_created]}, "
+        f"Pre-existing matches: {[n['title'] for n in joplin_notes if expected_title.lower() in n['title'].lower() and n['title'].lower() in before_titles]}"
+    )
+
+    # 2. Language — validate English too; reject empty/error payloads
     lang = response_data.get("lang", "English")
-    lang_ok = True
-    if lang == "Spanish":
+    is_empty_or_error = not content or content.strip() == "" or "*Pipeline error*" in content or "*Error:*" in content
+    if is_empty_or_error:
+        lang_ok = False
+    elif lang == "English":
+        # English: require non-empty, coherent response with basic structure
+        lang_ok = len(content.split()) >= 5 and not content.startswith("*")
+    elif lang == "Spanish":
         lang_ok = any(w in content.lower() for w in ["país", "español", "tabla", "datos"])
     elif lang == "French":
         lang_ok = any(w in content.lower() for w in ["révolution", "française", "chronologie"])
@@ -93,8 +109,10 @@ def score_prompt(num: int, response_data: dict, joplin_notes: list[dict]) -> dic
         lang_ok = any(w in content.lower() for w in ["países", "américa", "sul", "classificação"])
     elif lang == "Korean":
         lang_ok = any(w in content for w in ["한국", "도시", "인구"])
+    else:
+        lang_ok = not is_empty_or_error
     scores["language"] = 1 if lang_ok else 0
-    details["language"] = "Correct language detected" if lang_ok else "Language mismatch or empty"
+    details["language"] = "Valid response in correct language" if lang_ok else "Empty, error payload, or language mismatch"
     
     # 3. Quality (has markdown structure, tables, or sections)
     quality_ok = any(marker in content for marker in ["#", "|", "---", "##", "###"])
@@ -138,12 +156,18 @@ def score_prompt(num: int, response_data: dict, joplin_notes: list[dict]) -> dic
 
 
 def generate_scorecard():
-    joplin_notes = get_joplin_notes()
-    print(f"Found {len(joplin_notes)} Joplin notes:")
-    for n in joplin_notes:
+    joplin_before = get_joplin_notes()
+    print(f"Joplin notes BEFORE test run: {len(joplin_before)}")
+    for n in joplin_before:
         print(f"  - {n['title']}")
     print()
-    
+
+    joplin_after = get_joplin_notes()
+    print(f"Joplin notes AFTER test run: {len(joplin_after)}")
+    for n in joplin_after:
+        print(f"  - {n['title']}")
+    print()
+
     results = []
     for num in range(1, 11):
         path = os.path.join(OUTPUT_DIR, f"research_pipeline_test_{num:02d}.json")
@@ -152,7 +176,7 @@ def generate_scorecard():
             continue
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        score = score_prompt(num, data, joplin_notes)
+        score = score_prompt(num, data, joplin_after, joplin_before)
         results.append(score)
     
     # Print scorecard

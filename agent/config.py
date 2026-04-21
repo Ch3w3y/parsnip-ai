@@ -28,14 +28,14 @@ MODEL_ALIASES = {
         "google/gemini-2.5-flash",
     ],
     "reasoning": [
-        "google/gemini-3-flash-preview",
+        "moonshotai/kimi-k2-6",
         "google/gemini-2.5-pro",
         "qwen/qwen3.6-plus",
         "qwen/qwen3-235b-a22b-2507",
         "deepseek/deepseek-chat-v3.2",
     ],
     "graph": [
-        "google/gemini-3-flash-preview",
+        "moonshotai/kimi-k2-6",
         "google/gemini-2.5-pro",
         "qwen/qwen3.6-plus",
         "qwen/qwen3-235b-a22b-2507",
