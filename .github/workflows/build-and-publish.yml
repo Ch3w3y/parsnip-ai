@@ -22,7 +22,27 @@ permissions:
   id-token: write
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: |
+          pip install -r tests/requirements.txt
+          pip install -r agent/requirements.txt
+
+      - name: Run static / unit tests
+        run: pytest -m "not integration and not slow"
+
   build-and-push:
+    needs: test
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
