@@ -136,7 +136,7 @@ async def chat_stream(req: ChatRequest):
 
     async def event_stream():
         try:
-            async for event in agent.astream_events(state, config=config, version="v2"):
+            async for event in agent.astream_events(state, config={**config, "recursion_limit": 50}, version="v2"):
                 kind = event["event"]
 
                 if kind == "on_chat_model_stream":
@@ -193,7 +193,7 @@ async def chat_sync(req: ChatRequest):
         "memory_context": memory_ctx,
     }
 
-    result = await agent.ainvoke(state, config={**config, "recursion_limit": 100})
+    result = await agent.ainvoke(state, config={**config, "recursion_limit": 50})
     last = result["messages"][-1]
     return ChatResponse(thread_id=thread_id, content=last.content)
 

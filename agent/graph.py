@@ -606,21 +606,21 @@ def _get_llm(model: str | None = None, streaming: bool = True) -> ChatOpenAI:
 
 
 TOOL_CALL_BUDGETS = {
-    "low": 10,
-    "mid": 20,
-    "high": 45,
+    "low": 5,
+    "mid": 12,
+    "high": 25,
 }
-SAME_TOOL_REPEAT_LIMIT = 5  # repeated same tool with identical args
+SAME_TOOL_REPEAT_LIMIT = 2  # repeated same tool with identical args
 SAME_TOOL_REPEAT_LIMITS = {
     # Analysis tools often need iterative refinement/fixing across a few runs.
-    "execute_r_script": 10,
-    "execute_python_script": 10,
-    "execute_workspace_script": 10,
-    "write_and_execute_script": 10,
-    "web_search": 7,
-    "kb_search": 7,
-    "holistic_search": 7,
-    "adaptive_search": 7,
+    "execute_r_script": 5,
+    "execute_python_script": 5,
+    "execute_workspace_script": 5,
+    "write_and_execute_script": 5,
+    "web_search": 3,
+    "kb_search": 3,
+    "holistic_search": 3,
+    "adaptive_search": 3,
 }
 
 ANALYSIS_TOOL_NAMES = {
@@ -885,6 +885,51 @@ def _response_calls_analysis_tool(response: BaseMessage) -> bool:
     return False
 
 
+def _prune_messages(messages: list[BaseMessage], max_tool_chars: int = 12000) -> list[BaseMessage]:
+    """Prune long tool outputs and history to keep context manageable (~10-15k tokens)."""
+    pruned = []
+    if not messages:
+        return []
+
+    # Always keep system prompt if first
+    start_idx = 0
+    if isinstance(messages[0], SystemMessage):
+        pruned.append(messages[0])
+        start_idx = 1
+
+    # Keep the rest, but truncate giant tool messages
+    for msg in messages[start_idx:]:
+        if isinstance(msg, ToolMessage) and len(str(msg.content)) > max_tool_chars:
+            new_content = str(msg.content)[:max_tool_chars] + "\n\n[... output truncated to save context ...]"
+            msg = ToolMessage(
+                content=new_content,
+                tool_call_id=msg.tool_call_id,
+                status=getattr(msg, "status", "success"),
+            )
+        pruned.append(msg)
+
+    # If history is getting very long, drop middle messages but keep context
+    # (Keep System + First User Msg + Last 15 messages)
+    if len(pruned) > 25:
+        # Find first human message
+        first_user_idx = -1
+        for i, m in enumerate(pruned):
+            if isinstance(m, HumanMessage):
+                first_user_idx = i
+                break
+        
+        if first_user_idx != -1:
+            head = pruned[:first_user_idx + 1]
+            tail = pruned[-20:]
+            # Ensure tail starts with an AIMessage if it follows a ToolMessage from head
+            # but LangGraph usually handles this.
+            pruned = head + [HumanMessage(content="[... older history omitted to save context ...]")] + tail
+        else:
+            pruned = pruned[:1] + pruned[-20:]
+
+    return pruned
+
+
 def make_agent_node(db_url: str):
     def agent_node(state: AgentState):
         llm = _get_llm(state.get("model_override"))
@@ -908,6 +953,9 @@ def make_agent_node(db_url: str):
         prompt = BASE_PROMPT
         if memory_ctx:
             prompt = prompt + "\n\n" + memory_ctx
+
+        # ── Message Pruning ───────────────────────────────────────────────────
+        state["messages"] = _prune_messages(state["messages"])
 
         # ── Write-loop tracker (file write deduplication) ─────────────────────
         write_tracker = state.get("_write_tracker") or {
