@@ -126,10 +126,11 @@ class TestSchedulerImports:
 
 class TestJoplinMcpImports:
     def test_joplin_mcp_imports(self):
-        old_path = sys.path.copy()
-        try:
-            sys.path.insert(0, str(JOPLIN_MCP_DIR))
-            import server
-            assert hasattr(server, "main")
-        finally:
-            sys.path = old_path
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "joplin_mcp_server", str(JOPLIN_MCP_DIR / "server.py")
+        )
+        assert spec is not None
+        module = importlib.util.module_from_spec(spec)
+        assert hasattr(module, "main")
