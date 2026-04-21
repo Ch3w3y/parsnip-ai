@@ -23,10 +23,10 @@ MODEL_ALIASES = {
         "nvidia/nemotron-3-super-120b-a12b:free",
     ],
     "reasoning": [
-        "qwen/qwen-3.6-plus",
+        "qwen/qwen3.6-plus",
     ],
     "graph": [
-        "qwen/qwen-3.6-plus",
+        "qwen/qwen3.6-plus",
     ],
     "classifier": [
         "qwen/qwen2.5-3b-instruct",
