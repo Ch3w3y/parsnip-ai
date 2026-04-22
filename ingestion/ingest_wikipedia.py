@@ -149,10 +149,9 @@ async def process_articles(wiki_dir: Path, skip: int = 0, limit: int | None = No
             }
 
             for idx, chunk in enumerate(chunks):
-                # Unique source_id per chunk: "Title::chunk_N"
-                source_id = f"{article['title']}::{idx}"
+                source_id = article["title"]
                 pending_texts.append(chunk)
-                pending_rows.append((source_id, 0, metadata))
+                pending_rows.append((source_id, idx, metadata))
 
                 if len(pending_texts) >= BATCH_SIZE:
                     await flush_batch()

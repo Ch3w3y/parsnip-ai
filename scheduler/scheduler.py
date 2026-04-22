@@ -189,27 +189,46 @@ async def _run_joplin_watcher():
 
 
 async def run_backup():
-    """Run knowledge base backup to GCS."""
+    """Run knowledge base and Joplin DB backup to GCS."""
     import subprocess
     logger.info("Running KB backup to GCS…")
     try:
+        # Increased timeout to 1h for large KB
         result = subprocess.run(
             [sys.executable, str(Path(__file__).parent / "scripts" / "backup_kb.py")],
-            capture_output=True, text=True, timeout=300,
+            capture_output=True, text=True, timeout=3600,
         )
         if result.returncode == 0:
-            logger.info(f"KB backup completed: {result.stdout[-200:]}")
+            logger.info("KB backup completed successfully.")
         else:
             logger.error(f"KB backup failed: {result.stderr[-500:]}")
     except Exception as e:
         logger.error(f"KB backup error: {e}")
 
 
+async def run_config_backup():
+    """Run project configuration and code backup to GCS."""
+    import subprocess
+    logger.info("Running config backup to GCS…")
+    try:
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).parent / "scripts" / "backup_config.py")],
+            capture_output=True, text=True, timeout=300,
+        )
+        if result.returncode == 0:
+            logger.info("Config backup completed successfully.")
+        else:
+            logger.error(f"Config backup failed: {result.stderr[-500:]}")
+    except Exception as e:
+        logger.error(f"Config backup error: {e}")
+
+
 async def main():
     scheduler = AsyncIOScheduler()
 
-    # Run backup first, before any ingestion jobs
-    logger.info("Running initial KB backup…")
+    # Run initial backups on startup
+    logger.info("Running initial backups…")
+    await run_config_backup()
     await run_backup()
 
     scheduler.add_job(run_news, CronTrigger(hour=6, minute=0), id="news")
@@ -225,14 +244,18 @@ async def main():
     # Joplin sync is now handled by joplin_watcher.py (polls every 30s, triggers on change)
     # Safety fallback: run every 6h in case watcher misses something
     scheduler.add_job(run_joplin, CronTrigger(hour="*/6"), id="joplin_safety")
-    # KB backups 4x daily at 00:00, 06:00, 12:00, 18:00 UTC
-    scheduler.add_job(run_backup, CronTrigger(hour="0,6,12,18", minute=0), id="kb_backup")
+
+    # KB backups 4x daily: 02:00, 08:00, 14:00, 20:00 UTC
+    scheduler.add_job(run_backup, CronTrigger(hour="2,8,14,20", minute=0), id="kb_backup")
+    
+    # Config backup: daily at 01:00 UTC
+    scheduler.add_job(run_config_backup, CronTrigger(hour=1, minute=0), id="config_backup")
 
     scheduler.start()
     logger.info(
         "Scheduler started. Jobs: news=daily@06:00 | arxiv=Mon@03:00 | "
         "biorxiv=Tue@03:00 | wikipedia=Sun@02:00 | forex=daily@07:00 | "
-        "world_bank=Sun@04:00 | joplin_safety=every 6h UTC | backup=4x daily UTC"
+        "world_bank=Sun@04:00 | joplin_safety=every 6h | backup_kb=4x daily | backup_config=daily@01:00"
     )
     logger.info(
         "Wikipedia updates are gated — will not run until dump seed is marked done in ingestion_jobs."

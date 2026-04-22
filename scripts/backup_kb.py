@@ -32,6 +32,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 DB_URL = os.environ.get("DATABASE_URL", "postgresql://agent:[REDACTED]@localhost:5432/agent_kb")
+JOPLIN_DB_URL = os.environ.get("JOPLIN_DATABASE_URL", "postgresql://agent:[REDACTED]@localhost:5432/joplin")
 
 
 def export_table_to_parquet(conn, table: str, columns: list[str], output_path: Path, partition_col: str | None = None):
@@ -43,7 +44,11 @@ def export_table_to_parquet(conn, table: str, columns: list[str], output_path: P
     query = f"SELECT {col_str} FROM {table}"
 
     logger.info(f"Exporting {table}...")
-    df = pd.read_sql(query, conn)
+    try:
+        df = pd.read_sql(query, conn)
+    except Exception as e:
+        logger.error(f"  Failed to export {table}: {e}")
+        return
 
     if df.empty:
         logger.warning(f"No rows in {table}")
@@ -66,21 +71,14 @@ def export_table_to_parquet(conn, table: str, columns: list[str], output_path: P
                 df[col] = df[col].apply(lambda x: _json.dumps(x) if x is not None else None)
 
     # Convert pgvector embedding to float arrays
-    # read_sql can return embeddings as lists, numpy arrays, or strings depending on registration.
     if "embedding" in df.columns:
         def _to_float_list(x):
-            if x is None:
-                return None
+            if x is None: return None
             if isinstance(x, str):
-                # Parse string "[0.1, 0.2, ...]"
-                try:
-                    return [float(v) for v in x.strip("[]").split(",") if v.strip()]
-                except Exception:
-                    return None
-            if isinstance(x, (list, np.ndarray)):
-                return [float(v) for v in x]
+                try: return [float(v) for v in x.strip("[]").split(",") if v.strip()]
+                except Exception: return None
+            if isinstance(x, (list, np.ndarray)): return [float(v) for v in x]
             return list(x)
-            
         df["embedding"] = df["embedding"].apply(_to_float_list)
 
     df.to_parquet(output_path, engine="pyarrow", compression="snappy", index=False)
@@ -89,20 +87,27 @@ def export_table_to_parquet(conn, table: str, columns: list[str], output_path: P
 
 
 def backup_to_local(output_dir: Path) -> dict:
-    """Backup both tables to local Parquet files."""
+    """Backup all tables from both databases to local Parquet files."""
     import pandas as pd
     from pgvector.psycopg import register_vector
 
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    backup_dir = output_dir / today
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    metadata = {
+        "date": today,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "databases": {},
+    }
+
+    # ── 1. Backup Agent KB ──
+    logger.info("Backing up Agent KB...")
     conn = psycopg.connect(DB_URL)
     register_vector(conn)
     try:
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        backup_dir = output_dir / today
-        backup_dir.mkdir(parents=True, exist_ok=True)
-
         kb_path = backup_dir / "knowledge_chunks.parquet"
         mem_path = backup_dir / "agent_memories.parquet"
-        meta_path = backup_dir / "metadata.json"
 
         export_table_to_parquet(
             conn,
@@ -120,33 +125,46 @@ def backup_to_local(output_dir: Path) -> dict:
             mem_path,
         )
 
-        # Get stats
-        kb_count = pd.read_parquet(kb_path).shape[0] if kb_path.exists() else 0
-        mem_count = pd.read_parquet(mem_path).shape[0] if mem_path.exists() else 0
-
-        metadata = {
-            "date": today,
-            "knowledge_chunks_count": kb_count,
-            "agent_memories_count": mem_count,
-            "knowledge_chunks_size_mb": round(kb_path.stat().st_size / (1024 * 1024), 2) if kb_path.exists() else 0,
-            "agent_memories_size_mb": round(mem_path.stat().st_size / (1024 * 1024), 2) if mem_path.exists() else 0,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+        metadata["databases"]["agent_kb"] = {
+            "knowledge_chunks_count": pd.read_parquet(kb_path).shape[0] if kb_path.exists() else 0,
+            "agent_memories_count": pd.read_parquet(mem_path).shape[0] if mem_path.exists() else 0,
         }
-
-        with open(meta_path, "w") as f:
-            json.dump(metadata, f, indent=2)
-
-        logger.info(f"Local backup complete: {backup_dir}")
-        return metadata
-
     finally:
         conn.close()
 
+    # ── 2. Backup Joplin DB ──
+    logger.info("Backing up Joplin DB...")
+    try:
+        conn_j = psycopg.connect(JOPLIN_DB_URL)
+        try:
+            # Joplin schema uses 'name' for the filename and 'content' for the body
+            # jop_type: 1=note, 2=folder, 3=setting, 4=resource, etc.
+            items_path = backup_dir / "joplin_items.parquet"
+            export_table_to_parquet(
+                conn_j,
+                "items",
+                ["id", "name", "content_size", "jop_updated_time", 
+                 "jop_type", "owner_id", "jop_parent_id"],
+                items_path,
+            )
+            metadata["databases"]["joplin"] = {
+                "items_count": pd.read_parquet(items_path).shape[0] if items_path.exists() else 0,
+            }
+        finally:
+            conn_j.close()
+    except Exception as e:
+        logger.error(f"Joplin DB backup failed: {e}")
+
+    logger.info(f"Local backup complete: {backup_dir}")
+    meta_path = backup_dir / "metadata.json"
+    with open(meta_path, "w") as f:
+        json.dump(metadata, f, indent=2)
+
+    return metadata
 
 
+def upload_to_gcs(local_dir: Path, bucket_name: str, retain: int = 14):
 
-
-def upload_to_gcs(local_dir: Path, bucket_name: str, retain: int = 7):
     """Upload local backup to GCS and rotate old backups."""
     sys.path.insert(0, str(Path(__file__).parent.parent / "storage"))
     from gcs import GCSClient

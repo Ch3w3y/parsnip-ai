@@ -218,6 +218,7 @@ services:
     network_mode: host
     environment:
       DATABASE_URL: postgresql://agent:${POSTGRES_PASSWORD}@localhost:5432/agent_kb
+      JOPLIN_DATABASE_URL: postgresql://agent:${POSTGRES_PASSWORD}@localhost:5432/joplin
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://localhost:11434}
       EMBED_MODEL: ${EMBED_MODEL:-mxbai-embed-large}
       NEWS_API_KEY: ${NEWS_API_KEY}
@@ -230,6 +231,7 @@ services:
     volumes:
       - ./gcs-key.json:/app/gcs-key.json:ro
       - ./ingestion/data:/app/ingestion/data
+      - .:/app/project_root:ro
     depends_on:
       postgres:
         condition: service_healthy
