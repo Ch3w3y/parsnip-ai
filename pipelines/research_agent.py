@@ -151,6 +151,10 @@ class Pipeline:
                         yield f"\n\n*Error: {event.get('content', 'Unknown error')}*"
 
                     elif event_type == "done":
+                        model_id = event.get("model_id", "")
+                        if model_id:
+                            hud = f"\n\n---\n\n<small>🤖 **Model:** {model_id}</small>"
+                            yield hud
                         break
 
             # Post-stream: enrich with Joplin content if a deep-link was generated
@@ -211,8 +215,15 @@ class Pipeline:
             data = response.json()
             content = data.get("content", "")
             content = content if isinstance(content, str) else str(content)
+            model_id = data.get("model_id", "")
+            
             # Enrich with Joplin note content if a deep-link is present
             content = self._enrich_with_joplin(content)
+            
+            if model_id:
+                hud = f"\n\n---\n\n<small>🤖 **Model:** {model_id}</small>"
+                return f"{content}{hud}"
+            
             return content
         except Exception as e:
             return f"*Pipeline error: {e}*"
