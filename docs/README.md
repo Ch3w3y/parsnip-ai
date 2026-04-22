@@ -5,6 +5,6 @@
 - [Configuration](CONFIGURATION.md)
 - [Deployment](DEPLOYMENT.md)
 - [Extending](EXTENDING.md)
-- [Storage and Backup Guidance](CLOUD_STORAGE_PLAN.md)
+- [Storage and Backup Guidance](STORAGE_AND_BACKUP.md)
 - [Hybrid RAG Showcase](HYBRID_RAG_SHOWCASE.md)
 - [Branding Assets](branding/README.md)

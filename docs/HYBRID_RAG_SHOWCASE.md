@@ -1,110 +1,85 @@
-# Hybrid RAG Capabilities Showcase
+# Hybrid Retrieval Workflows
 
-This document demonstrates the agent's unique ability to **synthesize real-time web data with curated knowledge base (KB) grounding** — a capability we call **Hybrid RAG**.
+This document describes the platform's hybrid retrieval pattern: combine current
+web or API results with local knowledge-base context, then produce a sourced
+answer or analysis artifact.
 
-## What is Hybrid RAG?
+## Retrieval Pattern
 
-Traditional RAG systems retrieve from a static corpus. Our agent goes further:
+1. **Classify the request** by complexity and intent.
+2. **Fetch current context** through web search or live APIs when freshness is
+   required.
+3. **Search the local KB** for background, prior notes, source documents, and
+   structured context.
+4. **Merge evidence** while preserving source identifiers.
+5. **Synthesize the answer** with citations, caveats, and optional analysis
+   artifacts.
 
-1. **Live Web Search** — pulls current news, papers, and developments (2025-2026)
-2. **KB Grounding** — anchors findings in Wikipedia-curated historical context (5.9M+ chunks, 725k+ articles)
-3. **Cross-Source Synthesis** — connects temporal dots: *what's happening now* + *why it matters historically*
-4. **Provenance Tracking** — every claim tagged with `[Source: Web Search]` or `[Source: KB Topic]`
+The exact KB size changes as ingestion jobs run, so examples should avoid fixed
+record counts unless they are generated from a fresh `kb_report.py` run.
 
----
+## Example: Current Topic With Historical Context
 
-## Demo 1: Space Exploration — Current and Historical
+Prompt:
 
-### Prompt
-> Search the web for latest space exploration news (2025-2026), then search the KB for Apollo/NASA history. Synthesize a report connecting current developments to historical context.
-
-### Output Excerpt
-
-# Space Exploration: Current and Historical
-
-## 1. Introduction
-Space exploration has entered a new era, transitioning from the Cold War-driven "Space Race" to a collaborative and commercialized frontier.
-
-## 2. Historical Context: The Apollo Era and NASA's Origins
-*   **The Space Race:** Ignited by the Soviet Union's launch of *Sputnik 1* in 1957, the U.S. responded by creating NASA in 1958 **[Source: Apollo 11 KB]**
-*   **Apollo Program:** Dedicated by President Kennedy, successfully landed 12 astronauts on the Moon between 1969 and 1972 **[Source: Apollo Program KB]**
-
-## 3. The New Frontier: 2025–2026
-
-### NASA's Artemis Program
-*   **Current Status:** Artemis 1 tested uncrewed SLS/Orion; crewed missions face spacesuit/HLS delays **[Source: Web Search]**
-*   **Next Steps:** Commercial lander demos scheduled for 2027 **[Source: NASA Moon to Mars]**
-
-### SpaceX Starship
-*   **Starship Progress:** Iterating on lunar/Martian lander design
-*   **Vertical Integration:** In February 2026, SpaceX integrated xAI to accelerate AI-driven rocketry **[Source: SpaceX Updates]**
-
-## 4. Synthesis
-The historical focus was on national prestige; the current focus is on sustainability. Artemis utilizes Apollo knowledge to establish long-term lunar presence, facilitating Mars missions **[Source: NASA News]**.
-
-## 5. References
-- **KB:** Wikipedia articles on "Apollo 11", "Apollo Program"
-- **Web:** SpaceX Official Updates (2026), NASA Artemis Reports, Space.com
-
----
-
-## Why This Matters
-
-| Capability | Traditional RAG | Hybrid RAG (Ours) |
-|------------|---------------|-------------------|
-| Data freshness | Stale (last ingestion) | Real-time web + KB |
-| Historical depth | Corpus-only | Wikipedia + current news |
-| Source provenance | Implicit | Explicit `[Source: X]` tags |
-| Cross-domain links | Manual | Auto-generated |
-| Output format | Plain text | Markdown reports with Joplin export |
-
-## Running the Demos
-
-```bash
-# Run all curated demo prompts
-python scripts/run_demo.py
-
-# Run a specific demo scenario
-python scripts/run_demo.py --scenario space_exploration
+```text
+Search for recent lunar exploration developments, then use the local KB for
+Apollo and NASA background. Produce a short report connecting current activity
+to historical context.
 ```
 
-## Demo Scenarios Available
+Expected tool path:
 
-| # | Scenario | Web Query | KB Query | Output |
-|---|----------|-----------|----------|--------|
-| 1 | Space Exploration | Artemis/Starship 2025-2026 | Apollo Program, NASA history | Synthesis report |
-| 2 | Quantum Computing | IBM/Google breakthroughs 2025-2026 | Quantum mechanics, algorithms | Analysis + chart |
-| 3 | Climate Policy | COP30, carbon targets 2025-2026 | Climate science, renewable energy | Policy brief |
-| 4 | AI/ML Trends | Latest models, benchmarks 2025-2026 | AI history, neural networks | Trend report |
-| 5 | Geopolitics | Current conflicts, alliances | Historical context, treaties | Risk assessment |
-
-## Architecture
-
-```
-User Prompt
-    |
-    v
-[Agent Classifier] -> tier=high, intent=research
-    |
-    v
-[Web Search Tool]  -> current articles, news, papers
-    |
-    v
-[KB Search Tool]   -> Wikipedia grounding, historical context
-    |
-    v
-[Analysis Tool]    -> charts, stats, word clouds (optional)
-    |
-    v
-[Synthesis Node]   -> cross-source markdown report
-    |
-    v
-[Joplin Export]    -> persistent note with joplin:// link
+```mermaid
+flowchart LR
+    Prompt[User prompt] --> Classifier[Complexity and intent classifier]
+    Classifier --> Web[Web or news search]
+    Classifier --> KB[KB search<br/>Wikipedia, notes, research]
+    Web --> Evidence[Evidence merge]
+    KB --> Evidence
+    Evidence --> Answer[Sourced report]
+    Answer --> Joplin[Optional Joplin export]
 ```
 
-## Tags for Marketing
+Expected output structure:
 
-- `#hybrid-rag` — our core differentiator
-- `#real-time-research` — web + KB, not just corpus
-- `#provenance-tracking` — every claim sourced
-- `#cross-domain-synthesis` — connecting temporal + topical boundaries
+- Current developments with source links.
+- Historical context from local KB records.
+- Comparison of what changed and what stayed constant.
+- Clear separation between live web findings and local KB evidence.
+
+## Example: Research Synthesis
+
+Prompt:
+
+```text
+Find recent papers about retrieval-augmented generation evaluation, compare them
+with established local notes, and identify practical implications for this
+stack.
+```
+
+Expected tool path:
+
+- `adaptive_search` for current web/research context.
+- `kb_search` or `holistic_search` for local papers, notes, and Wikipedia.
+- `compare_sources` when the answer needs explicit disagreement or coverage
+  analysis.
+- `save_memory` only when the user asks to preserve a durable project fact.
+
+## Provenance Expectations
+
+Responses should keep evidence traceable:
+
+- Preserve URLs for web results.
+- Preserve `source`, `source_id`, and `chunk_index` for KB records.
+- Mark uncertainty when a live result is unavailable or stale.
+- Prefer source comparison over unsupported synthesis when sources conflict.
+
+## Related Components
+
+- `agent/tools/adaptive_search.py`
+- `agent/tools/holistic_search.py`
+- `agent/tools/kb_search.py`
+- `agent/tools/compare_sources.py`
+- `agent/tools/timeline.py`
+- `agent/tools/joplin.py`

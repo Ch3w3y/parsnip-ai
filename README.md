@@ -112,6 +112,15 @@ Minimum useful settings:
 POSTGRES_PASSWORD=replace-with-a-strong-password
 DATABASE_URL=postgresql://agent:${POSTGRES_PASSWORD}@localhost:5432/agent_kb
 
+LLM_PROVIDER=openai_compat
+DEFAULT_LLM=smart
+RESEARCH_LLM=reasoning
+FAST_MODEL=provider/fast-model
+SMART_MODEL=provider/smart-model
+REASONING_MODEL=provider/reasoning-model
+GRAPH_MODEL=provider/smart-model
+CLASSIFIER_MODEL=provider/classifier-model
+
 OLLAMA_BASE_URL=http://localhost:11434
 EMBED_MODEL=mxbai-embed-large
 
@@ -161,7 +170,7 @@ Common workflows:
 - [Architecture diagrams](docs/ARCHITECTURE_VISUALS.md)
 - [Configuration](docs/CONFIGURATION.md)
 - [Deployment](docs/DEPLOYMENT.md)
-- [Storage and backup guidance](docs/CLOUD_STORAGE_PLAN.md)
+- [Storage and backup guidance](docs/STORAGE_AND_BACKUP.md)
 - [Extension guide](docs/EXTENDING.md)
 - [Hybrid RAG showcase](docs/HYBRID_RAG_SHOWCASE.md)
 - [Branding assets](docs/branding/README.md)

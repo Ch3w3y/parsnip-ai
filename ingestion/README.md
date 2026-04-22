@@ -7,12 +7,14 @@ All scripts run via `uv run python <script>` from the `ingestion/` directory. Sh
 | Script | Source | Conflict | Schedule |
 |--------|--------|----------|----------|
 | `ingest_wikipedia.py` | Wikipedia dump (6.7M articles) | `DO UPDATE` | One-time seed + weekly updates |
-| `ingest_wikipedia_updates.py` | MediaWiki recentchanges API | `DO UPDATE` | Weekly Sun 02:00 UTC |
+| `ingest_wikipedia_updates.py` | MediaWiki recentchanges API | `DO UPDATE` | Weekly Sun 02:00 UTC, gated until seed completion |
 | `ingest_arxiv.py` | arXiv API abstracts | `DO NOTHING` | Weekly Mon 03:00 UTC |
-| `ingest_biorxiv.py` | bioRxiv/medRxiv API | `DO NOTHING` | Weekly Mon 03:00 UTC |
+| `ingest_biorxiv.py` | bioRxiv/medRxiv API | `DO NOTHING` | Weekly Tue 03:00 UTC |
 | `ingest_news_api.py` | NewsAPI.org (150k+ sources) | `DO NOTHING` | Daily 06:00 UTC |
+| `ingest_forex.py` | Exchange-rate time series | `DO UPDATE` | Daily 07:00 UTC |
+| `ingest_worldbank.py` | World Bank indicators | `DO UPDATE` | Weekly Sun 04:00 UTC |
 | `ingest_news.py` | RSS feeds (fallback) | `DO NOTHING` | Manual only |
-| `ingest_joplin.py` | Joplin Server notes | `DO UPDATE` | Every 6h via scheduler |
+| `ingest_joplin.py` | Joplin Server notes | `DO UPDATE` | Watcher polls every 30s; scheduler safety every 6h |
 | `ingest_github.py` | GitHub repos (source + docs) | `DO UPDATE` | Manual only |
 
 **Conflict strategy rationale:** Wikipedia and Joplin notes change over time → overwrite. arXiv, bioRxiv, and news articles are immutable once published → skip duplicates. GitHub repos change → overwrite content+embedding, preserve `created_at`, set `updated_at`.
@@ -20,7 +22,7 @@ All scripts run via `uv run python <script>` from the `ingestion/` directory. Sh
 ## Shared Utilities (`utils.py`)
 
 ```python
-chunk_text(text, chunk_words=300, overlap_words=40)  # word-count sliding window
+chunk_text(text, chunk_words=200, overlap_words=40)  # word-count sliding window
 embed_batch(texts, retries=3)                         # Ollama /api/embed, truncate=True
 bulk_upsert_chunks(conn, rows, on_conflict="update")  # executemany — one transaction
 upsert_chunks(conn, ...)                              # row-by-row fallback
@@ -72,7 +74,7 @@ uv run python ingest_github.py --from-raw path/to/file.jsonl.gz         # specif
 
 **Chunking strategy:**
 - **Code files** (`.py`, `.js`, `.ts`, `.go`, `.rs`, `.java`, `.c`, `.cpp`): split at function/class/type boundaries. Oversized functions (>600 words) fall back to word-based chunking.
-- **Doc files** (`.md`, `.txt`, `.rst`, `.json`, `.yaml`, etc.): standard 300-word word-based chunking.
+- **Doc files** (`.md`, `.txt`, `.rst`, `.json`, `.yaml`, etc.): standard word-based chunking.
 - Each chunk is prefixed with `File: path/to/file (language)` so the LLM knows context.
 
 **Metadata per chunk:**
@@ -117,11 +119,25 @@ bash scripts/download_wikipedia.sh   # uses Docker python:3.10-slim for wikiextr
 
 ## Scheduling
 
-The `scheduler` container (built from `scheduler/Dockerfile`) runs APScheduler jobs for all sources except Wikipedia. Start/stop with:
+The `scheduler` container (built from `scheduler/Dockerfile`) runs APScheduler jobs for recurring sources and backup maintenance. Wikipedia incremental updates are scheduled but skipped until the initial dump seed is marked complete in `ingestion_jobs`. Start/stop with:
 
 ```bash
 ./pi-ctl.sh ingest start|stop|status
 ```
+
+Current scheduled jobs:
+
+| Job | Trigger |
+|-----|---------|
+| NewsAPI | Daily 06:00 UTC |
+| arXiv | Monday 03:00 UTC |
+| bioRxiv/medRxiv | Tuesday 03:00 UTC |
+| Forex | Daily 07:00 UTC |
+| World Bank | Sunday 04:00 UTC |
+| Wikipedia updates | Sunday 02:00 UTC, after seed completion |
+| Joplin safety sync | Every 6h |
+| Knowledge-base backup | 02:00, 08:00, 14:00, 20:00 UTC |
+| Config backup | Daily 01:00 UTC |
 
 The Joplin watcher (`scheduler/joplin_watcher.py`) polls Joplin Server every 30s and triggers incremental ingestion on any note change.
 
@@ -132,7 +148,7 @@ The Joplin watcher (`scheduler/joplin_watcher.py`) polls Joplin Server every 30s
 3. **Follow the landing zone pattern:** separate `fetch_all_*()` from `process_*()`. Call `save_raw()` after fetching and add a `--from-raw` argument that calls `iter_raw()` instead of the API.
 4. Add it to `scheduler/scheduler.py` with an APScheduler trigger.
 5. Register the source in the routing system (see below).
-6. Document it in this file and in `CLAUDE.md`.
+6. Document it in this file and any user-facing docs that describe the source.
 
 ## Extending the Routing System
 
@@ -186,7 +202,7 @@ If you create a dedicated tool for the source (e.g. `code_search`), add it to `_
 - [ ] Ingestion script follows landing zone pattern (`fetch_all` → `save_raw` → `process` → `bulk_upsert_chunks`)
 - [ ] `source` column value is consistent and unique
 - [ ] `embedding_model` column is set correctly (use `bge-m3` for code, `mxbai-embed-large` for text)
-- [ ] `ROUTING_CONFIG` updated with intent layers and budget
+- [ ] `ROUTING_CONFIG` updated with intent layers and budget where relevant
 - [ ] `SOURCE_MODEL_MAP` updated if using a custom embedder
 - [ ] Docstrings updated in `kb_search.py` and `holistic_search.py`
-- [ ] Documented in this README and `CLAUDE.md`
+- [ ] Documented in this README and user-facing docs where relevant
