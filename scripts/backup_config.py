@@ -39,15 +39,23 @@ INCLUDE_PATHS = [
     "README.md",
 ]
 
+# External mounted volumes (absolute path in container -> path in archive)
+EXTERNAL_VOLUMES = {
+    "/app/owui_data": "volumes/owui_data",
+    "/app/pipelines_data": "volumes/pipelines_data",
+}
+
 # Exclude large or temporary directories within the included paths
 EXCLUDE_NAMES = [
-    "data",
     "__pycache__",
     ".pytest_cache",
     ".venv",
     ".git",
     "node_modules",
     "output",
+    "cache",
+    "vector_db",
+    "uploads",
 ]
 
 def create_archive(project_root: Path, output_path: Path) -> bool:
@@ -55,12 +63,11 @@ def create_archive(project_root: Path, output_path: Path) -> bool:
     logger.info(f"Creating configuration backup: {output_path}")
     
     def _exclude_filter(tarinfo):
-        # Exclude common large/temporary names
-        name = os.path.basename(tarinfo.name)
-        if name in EXCLUDE_NAMES:
-            return None
-        # Exclude ingestion data specifically
-        if "ingestion/data" in tarinfo.name:
+        path_parts = Path(tarinfo.name).parts
+        for name in EXCLUDE_NAMES:
+            if name in path_parts:
+                return None
+        if "ingestion" in path_parts and "data" in path_parts:
             return None
         return tarinfo
 
@@ -72,6 +79,15 @@ def create_archive(project_root: Path, output_path: Path) -> bool:
                     tar.add(str(full_path), arcname=path_str, filter=_exclude_filter)
                 else:
                     logger.warning(f"Path not found, skipping: {path_str}")
+            
+            # Explicitly backup webui.db without crawling the giant owui_data cache
+            webui_db_path = Path("/app/owui_data/webui.db")
+            if webui_db_path.exists():
+                logger.info("Found webui.db, adding to backup...")
+                tar.add(str(webui_db_path), arcname="volumes/owui_data/webui.db")
+            else:
+                logger.warning("webui.db not found at /app/owui_data/webui.db")
+                    
         return True
     except Exception as e:
         logger.error(f"Failed to create archive: {e}")
