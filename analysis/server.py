@@ -887,7 +887,7 @@ async def workspace_write_and_execute(
                         "filename": f.name,
                         "size": f.stat().st_size,
                         "type": _detect_type(f),
-                        "url": _file_url(str(rel), local_path=str(f)),
+                        "url": _file_url(str(rel)),
                     }
                 )
 
@@ -956,7 +956,7 @@ async def execute_notebook(req: NotebookRequest):
                         "filename": f.name,
                         "size": f.stat().st_size,
                         "type": _detect_type(f),
-                        "url": _file_url(str(rel), local_path=str(f)),
+                        "url": _file_url(str(rel)),
                     }
                 )
 
@@ -1076,7 +1076,7 @@ async def generate_dashboard(req: DashboardRequest):
                 "filename": f.name,
                 "size": f.stat().st_size,
                 "type": _detect_type(f),
-                "url": _file_url(str(rel), local_path=str(f)),
+                "url": _file_url(str(rel)),
             }
         )
 
@@ -1142,7 +1142,7 @@ async def generate_dashboard(req: DashboardRequest):
     dashboard_path = work_dir / "dashboard.html"
     dashboard_path.write_text("\n".join(html_parts), encoding="utf-8")
 
-    dashboard_url = _file_url(f"dashboard_{script_id}/dashboard.html", local_path=str(dashboard_path))
+    dashboard_url = _file_url(f"dashboard_{script_id}/dashboard.html")
 
     return {
         "dashboard_id": script_id,
@@ -1326,7 +1326,7 @@ async def _execute_scheduled_job(job_id: str):
                         "filename": f.name,
                         "size": f.stat().st_size,
                         "type": _detect_type(f),
-                        "url": _file_url(str(rel), local_path=str(f)),
+                        "url": _file_url(str(rel)),
                     }
                 )
 

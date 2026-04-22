@@ -18,6 +18,7 @@ import json
 from dataclasses import dataclass, field
 
 from .llm_client import llm_call
+from config import get_settings, MODEL_ALIASES
 
 # ── Embedding model routing ───────────────────────────────────────────────────
 SOURCE_MODEL_MAP = {
@@ -35,11 +36,11 @@ ROUTING_CONFIG = {
         "moderate": 0.6,  # below this → web + HyDE + targeted KB
         # above this → full pipeline with expanded KB search
     },
-    # LLM tier mapping — model names from .env or defaults
+    # LLM tier mapping — uses preferred model from each tier chain
     "llm_tiers": {
-        "low": os.environ.get("DEFAULT_LLM", "google/gemini-2.0-flash"),
-        "mid": os.environ.get("RESEARCH_LLM", "google/gemini-2.0-flash"),
-        "high": os.environ.get("RESEARCH_LLM", "google/gemini-2.0-flash"),
+        "low": MODEL_ALIASES["fast"][0],
+        "mid": MODEL_ALIASES["smart"][0],
+        "high": MODEL_ALIASES["reasoning"][0],
     },
     # Complexity scoring weights (sum doesn't need to be 1.0 — raw score)
     "weights": {
