@@ -115,7 +115,16 @@ async def main():
 
         while True:
             try:
-                current_updated = await get_latest_updated_time(http, token)
+                try:
+                    current_updated = await get_latest_updated_time(http, token)
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code in (401, 403):
+                        logger.info("Token expired or forbidden, re-authenticating...")
+                        token = await authenticate(http)
+                        current_updated = await get_latest_updated_time(http, token)
+                    else:
+                        raise
+
                 now = time.time()
 
                 if current_updated > last_updated:
