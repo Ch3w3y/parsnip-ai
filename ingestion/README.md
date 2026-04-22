@@ -193,9 +193,12 @@ Add your source to the default layer list and intent-specific reorderings:
 ("Your Source Label", ["your_source"], budgets.get("your_source", 3), None),
 ```
 
-### 5. `agent/tools/__init__.py` and `agent/graph.py`
+### 5. `agent/tools/__init__.py`, `agent/graph_tools.py`, and `agent/graph_prompts.py`
 
-If you create a dedicated tool for the source (e.g. `code_search`), add it to `__all__` in `__init__.py` and to the `TOOLS` list in `graph.py`.
+If you create a dedicated tool for the source (e.g. `code_search`):
+1. Add it to `__all__` in `agent/tools/__init__.py`.
+2. Add it to the `TOOLS` list in `agent/graph_tools.py`.
+3. Update `BASE_PROMPT` in `agent/graph_prompts.py` if the model needs to know when to use it.
 
 ### Pattern Checklist
 

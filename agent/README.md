@@ -7,11 +7,16 @@ streaming responses back to the OpenWebUI pipeline adapter.
 ## Architecture
 
 ```text
-graph.py
-  -> StateGraph
-       -> llm_node    resolves configured model aliases and invokes provider
-       -> tool_node   dispatches registered LangChain tools
-       -> checkpointer persists conversation state in PostgreSQL
+graph.py (orchestrator)
+  -> graph_nodes.py
+       -> agent node      dynamic tool selection + guardrails
+       -> classify node   complexity-based tier routing
+  -> graph_llm.py         model alias resolution + multi-provider client
+  -> graph_tools.py       tool pack definitions + request filtering
+  -> graph_guardrails.py  circuit breaker, cascade fallback, message pruning
+  -> graph_state.py       agent state, message helpers, memory loader
+  -> graph_prompts.py     system identity / BASE_PROMPT
+  -> tools/              LangChain tool implementations
 ```
 
 The runtime uses OpenAI-compatible clients where possible. Provider-specific
@@ -82,8 +87,8 @@ Thresholds, layer budgets, and intent/source mappings are in
 
 1. Create `agent/tools/<name>.py` with a `@tool` decorated async function.
 2. Import and export it in `agent/tools/__init__.py`.
-3. Add it to the `TOOLS` list in `agent/graph.py`.
-4. Add concise guidance to `BASE_PROMPT` in `agent/graph.py` if the model needs
+3. Add it to the `TOOLS` list in `agent/graph_tools.py`.
+4. Add concise guidance to `BASE_PROMPT` in `agent/graph_prompts.py` if the model needs
    to know when to use it.
 5. Add tests for behavior that affects routing, persistence, or user-visible
    output.

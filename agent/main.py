@@ -328,6 +328,68 @@ async def get_stats():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/ingestion/status")
+async def get_ingestion_status():
+    """Return the overall ingestion and migration health snapshot.
+
+    Covers:
+      - Wikipedia source_id schema migration (remaining rows, PID, readiness)
+      - Wikipedia bulk dump seed (running state, chunks/articles in KB, last job)
+      - Recent ingestion jobs across all sources
+      - Scheduled next-run hints for recurring sources
+    """
+    from ingestion_status import get_ingestion_overview, to_dict
+
+    try:
+        overview = await get_ingestion_overview()
+        return to_dict(overview)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/ingestion/migration")
+async def get_migration_detail():
+    """Deep-dive on the Wikipedia source_id migration only."""
+    from ingestion_status import get_migration_status
+
+    try:
+        m = await get_migration_status()
+        return {
+            "running": m.running,
+            "pid": m.pid,
+            "rows_remaining": m.rows_remaining,
+            "anomalous_rows": m.anomalous_rows,
+            "ready_for_ingestion": m.ready_for_ingestion,
+            "last_log_tail": m.last_log_tail,
+            "note": (
+                "If rows_remaining > 0 and running is False, the migration exited early. "
+                "Restart with: nohup python scripts/migrate_wiki_source_ids.py --batch-size 50000 ... &"
+            ),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/ingestion/wikipedia")
+async def get_wikipedia_detail():
+    """Deep-dive on the Wikipedia bulk seed and incremental update state."""
+    from ingestion_status import get_wikipedia_bulk_status
+
+    try:
+        b = await get_wikipedia_bulk_status()
+        return {
+            "bulk_ingest_running": b.running,
+            "bulk_ingest_pid": b.pid,
+            "chunks_in_kb": b.chunks_in_kb,
+            "articles_in_kb": b.articles_in_kb,
+            "last_job_status": b.last_job_status,
+            "last_job_processed": b.last_job_processed,
+            "resume_safe": (not b.running) and (b.last_job_processed or 0) > 0,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/upload/pdf")
 async def upload_pdf(file: UploadFile = File(...)):
     """Upload a PDF document to the personal knowledge base.

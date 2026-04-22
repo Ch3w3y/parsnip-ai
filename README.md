@@ -147,12 +147,14 @@ Useful checks:
 ./pi-ctl.sh status
 curl -sS http://localhost:8000/health
 curl -sS http://localhost:8000/stats
+curl -sS http://localhost:8000/ingestion/status
 curl -sS http://localhost:3000/api/config
 ```
 
 Common workflows:
 
 - Start or stop Wikipedia ingestion with `./pi-ctl.sh wiki start` and `./pi-ctl.sh wiki stop`.
+- Check ingestion / migration health with `curl -sS http://localhost:8000/ingestion/status` or `python scripts/ingestion_status.py`.
 - Run a knowledge base report with `python scripts/kb_report.py`.
 - Back up KB data with `python scripts/backup_kb.py`.
 - Back up project configuration with `python scripts/backup_config.py`.

@@ -25,7 +25,7 @@ Common extension routes:
 Add new agent capabilities by:
 1. Implementing tool module in `agent/tools/`.
 2. Registering tool in `agent/tools/__init__.py`.
-3. Wiring into `agent/graph.py` tool list and prompt contracts.
+3. Wiring into `agent/graph_tools.py` and `agent/graph_prompts.py` prompt contracts.
 
 ## Structured Data Support
 
