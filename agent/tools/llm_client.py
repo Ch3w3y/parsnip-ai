@@ -20,7 +20,7 @@ import os
 
 import httpx
 
-from config import get_settings, MODEL_ALIASES
+from config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -89,8 +89,8 @@ async def llm_call(
         use_gpu = True
         target_model = gpu_model
     else:
-        # Complex tasks or no GPU → OpenRouter
-        target_model = model or MODEL_ALIASES["fast"][0]
+        # Complex tasks or no GPU → configured fast model
+        target_model = model or settings.require_model("fast")
 
     # Try GPU Ollama first if applicable
     if use_gpu:
@@ -112,7 +112,7 @@ async def llm_call(
         return None
 
     if not target_model:
-        target_model = MODEL_ALIASES["fast"][0]
+        target_model = settings.require_model("fast")
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:

@@ -440,20 +440,21 @@ def _get_cascading_fallbacks(current_model: str, current_tier: str) -> list[str]
 
     Each tier has exactly one model. GPU low-tier is the final safety net.
     """
-    from config import MODEL_ALIASES, TIER_ALIASES
+    from config import TIER_ALIASES, get_settings
 
+    model_aliases = get_settings().model_aliases
     fallbacks: list[str] = []
 
     # 1. If high tier, add mid-tier model
     if current_tier == "high":
         mid_alias = TIER_ALIASES.get("mid", "smart")
-        mid_chain = MODEL_ALIASES.get(mid_alias, [])
+        mid_chain = model_aliases.get(mid_alias, [])
         if mid_chain and mid_chain[0] != current_model:
             fallbacks.append(mid_chain[0])
 
     # 2. Add low/free-tier model (OpenRouter)
     low_alias = TIER_ALIASES.get("low", "fast")
-    low_chain = MODEL_ALIASES.get(low_alias, [])
+    low_chain = model_aliases.get(low_alias, [])
     if low_chain and low_chain[0] != current_model and low_chain[0] not in fallbacks:
         fallbacks.append(low_chain[0])
 
@@ -487,6 +488,7 @@ def _invoke_with_fallback(llm, messages, tools: list | None = None, tier: str = 
 
     Order: same-tier → mid-tier → low/free-tier (Local GPU/Cloud).
     """
+    from config import get_settings
     settings = get_settings()
     current_model = getattr(llm, "model_name", "")
     fallback_chain = _get_cascading_fallbacks(current_model, tier)
@@ -547,7 +549,7 @@ def _get_llm(model: str | None = None, streaming: bool = True) -> ChatOpenAI:
     from config import get_settings
 
     settings = get_settings()
-    selected = settings.resolve_model(model or settings.default_llm)
+    selected = settings.require_model(model or settings.default_llm)
 
     # Route to Ollama Cloud if model ID ends in :cloud
     if selected.endswith(":cloud") and settings.ollama_api_key:
@@ -1179,7 +1181,13 @@ Examples:
         if not user_msg:
             return None
 
-        classifier_model = os.environ.get("CLASSIFIER_MODEL", settings.gpu_llm_model or "qwen2.5:3b")
+        classifier_model = (
+            settings.resolve_model("classifier")
+            or settings.gpu_llm_model
+            or settings.resolve_model("fast")
+        )
+        if not classifier_model:
+            raise RuntimeError("No classifier model configured. Set CLASSIFIER_MODEL or FAST_MODEL in .env.")
 
         try:
             payload = {

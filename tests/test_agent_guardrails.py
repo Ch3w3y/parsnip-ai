@@ -1,6 +1,7 @@
 """Tests for agent guardrail policy helpers."""
 
 import json
+import importlib
 import sys
 from pathlib import Path
 
@@ -8,6 +9,27 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "agent"))
+
+
+def test_model_aliases_resolve_from_environment(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://example")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test")
+    monkeypatch.setenv("FAST_MODEL", "local-fast,remote-fast")
+    monkeypatch.setenv("SMART_MODEL", "remote-smart")
+    monkeypatch.setenv("REASONING_MODEL", "remote-reasoning")
+    monkeypatch.setenv("GRAPH_MODEL", "remote-graph")
+    monkeypatch.setenv("CLASSIFIER_MODEL", "local-classifier")
+
+    import config
+
+    config.get_settings.cache_clear()
+    importlib.reload(config)
+    settings = config.get_settings()
+
+    assert settings.model_aliases["fast"] == ["local-fast", "remote-fast"]
+    assert settings.resolve_model("fast") == "local-fast"
+    assert settings.resolve_model("smart") == "remote-smart"
+    assert settings.resolve_model("raw-provider/model") == "raw-provider/model"
 
 
 def test_analysis_request_detection_requires_execution_intent():

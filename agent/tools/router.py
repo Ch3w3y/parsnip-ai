@@ -18,7 +18,7 @@ import json
 from dataclasses import dataclass, field
 
 from .llm_client import llm_call
-from config import get_settings, MODEL_ALIASES
+from config import get_settings
 
 # ── Embedding model routing ───────────────────────────────────────────────────
 SOURCE_MODEL_MAP = {
@@ -38,9 +38,9 @@ ROUTING_CONFIG = {
     },
     # LLM tier mapping — uses preferred model from each tier chain
     "llm_tiers": {
-        "low": MODEL_ALIASES["fast"][0],
-        "mid": MODEL_ALIASES["smart"][0],
-        "high": MODEL_ALIASES["reasoning"][0],
+        "low": get_settings().resolve_model("fast"),
+        "mid": get_settings().resolve_model("smart"),
+        "high": get_settings().resolve_model("reasoning"),
     },
     # Complexity scoring weights (sum doesn't need to be 1.0 — raw score)
     "weights": {

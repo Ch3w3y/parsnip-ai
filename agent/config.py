@@ -3,34 +3,27 @@ import json
 import logging
 import httpx
 from pydantic_settings import BaseSettings
+from pydantic_settings import SettingsConfigDict
 from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
-# Model alias registry — stable names mapped to provider IDs with fallback chains.
-# The first model in each chain is preferred; if it's unavailable (400 from OpenRouter),
-# the next fallback is tried automatically.
-#
-# To update: run GET /models on the agent, find the new provider ID, and update here.
-# Future: auto-sync from OpenRouter API on startup.
+def _model_chain_from_env(name: str, default: str = "") -> list[str]:
+    """Read a comma-separated model fallback chain from the environment."""
+    raw = os.environ.get(name, default)
+    chain = [item.strip() for item in raw.split(",") if item.strip()]
+    return chain
+
+
+# Model alias registry — stable app names mapped to provider IDs. Environment
+# variables are the source of truth for deployment-specific model choices.
+# Values may be comma-separated fallback chains.
 MODEL_ALIASES = {
-    # Single model per tier — cascading fallback goes DOWN tiers, not across chains.
-    # All agentic routing goes through OpenRouter; GPU is reserved for embeddings ONLY.
-    "fast": [
-        "nvidia/llama-3.3-nemotron-super-49b-v1.5",
-    ],
-    "smart": [
-        "nvidia/nemotron-3-super-120b-a12b:free",
-    ],
-    "reasoning": [
-        "moonshotai/kimi-k2-6",
-    ],
-    "graph": [
-        "moonshotai/kimi-k2-6",
-    ],
-    "classifier": [
-        "qwen/qwen2.5-3b-instruct",
-    ],
+    "fast": _model_chain_from_env("FAST_MODEL"),
+    "smart": _model_chain_from_env("SMART_MODEL"),
+    "reasoning": _model_chain_from_env("REASONING_MODEL"),
+    "graph": _model_chain_from_env("GRAPH_MODEL"),
+    "classifier": _model_chain_from_env("CLASSIFIER_MODEL"),
 }
 
 # Alias → complexity tier mapping
@@ -53,6 +46,14 @@ class Settings(BaseSettings):
     default_llm: str = "smart"
     research_llm: str = "reasoning"
     llm_provider: str = "openrouter"  # openrouter | openai_compat
+
+    # Alias targets. .env is the source of truth; these fields exist so aliases
+    # can be introspected and resolved consistently through Settings.
+    fast_model: str = ""
+    smart_model: str = ""
+    reasoning_model: str = ""
+    graph_model: str = ""
+    classifier_model: str = ""
 
     # Optional OpenAI-compatible backend for non-GPU LLM routing
     openai_compat_base_url: str = ""
@@ -79,8 +80,7 @@ class Settings(BaseSettings):
 
     log_level: str = "info"
 
-    class Config:
-        env_file = ".env"
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property
     def gpu_llm_enabled(self) -> bool:
@@ -101,16 +101,27 @@ class Settings(BaseSettings):
         """Resolve a model alias to an actual provider ID.
 
         If the input already looks like a provider ID (contains '/'), return it.
-        Otherwise, look it up in MODEL_ALIASES. Falls back to the first entry
-        in the chain.
+        Otherwise, look it up in the env-backed alias registry. Falls back to
+        the first entry in the chain.
         """
         if "/" in alias_or_id:
             return alias_or_id
-        chain = MODEL_ALIASES.get(alias_or_id)
-        if chain:
-            return chain[0]
+        aliases = self.model_aliases
+        if alias_or_id in aliases:
+            chain = aliases[alias_or_id]
+            return chain[0] if chain else ""
         # Not an alias — could be a raw model name (e.g. gpt-oss:20b from GPU LLM config)
         return alias_or_id
+
+    @property
+    def model_aliases(self) -> dict[str, list[str]]:
+        return {
+            "fast": _model_chain_from_env("FAST_MODEL", self.fast_model),
+            "smart": _model_chain_from_env("SMART_MODEL", self.smart_model),
+            "reasoning": _model_chain_from_env("REASONING_MODEL", self.reasoning_model),
+            "graph": _model_chain_from_env("GRAPH_MODEL", self.graph_model),
+            "classifier": _model_chain_from_env("CLASSIFIER_MODEL", self.classifier_model),
+        }
 
     def resolve_tier(self, tier: str) -> str:
         """Resolve a complexity tier (low/mid/high) to a model ID.
@@ -124,6 +135,15 @@ class Settings(BaseSettings):
             return self.gpu_mid_model
         alias = TIER_ALIASES.get(tier, "fast")
         return self.resolve_model(alias)
+
+    def require_model(self, alias_or_id: str) -> str:
+        model = self.resolve_model(alias_or_id)
+        if not model:
+            raise RuntimeError(
+                f"No model configured for '{alias_or_id}'. Set the corresponding "
+                "model alias in .env, e.g. FAST_MODEL, SMART_MODEL, or REASONING_MODEL."
+            )
+        return model
 
     def is_gpu_model(self, model_id: str) -> bool:
         """Check if a model ID should be routed to GPU Ollama."""
@@ -163,7 +183,7 @@ async def resolve_with_fallback(alias_or_id: str, api_key: str) -> str:
         logger.warning(f"Model {alias_or_id} unavailable, no fallback chain")
         return alias_or_id
 
-    chain = MODEL_ALIASES.get(alias_or_id, [alias_or_id])
+    chain = settings.model_aliases.get(alias_or_id, [alias_or_id])
     for model_id in chain:
         if await validate_model(model_id, api_key):
             if model_id != chain[0]:

@@ -33,9 +33,26 @@ scripts/.kb_report_note_id
 
 # Logs
 *.log
+nohup.out
+
+# Local scratch files
+expressions.txt
+scripts/test_news.py
 
 # Editor
 .idea/
 .vscode/
 *.swp
 *.swo
+
+# Local planning and agent-generated notes
+.codex
+.codex/
+.planning/
+docs/ROADMAP.md
+docs/*ROADMAP*.md
+docs/*roadmap*.md
+docs/future-*.md
+docs/*PLAN*.md
+docs/*plan*.md
+*.agent.md
