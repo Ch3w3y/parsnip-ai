@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  Open-source, self-hostable agentic research stack with grounded retrieval, memory, and notebook-grade analysis.
+  <b>A fully open-source, air-gappable agentic research stack designed for privacy, grounded retrieval, and notebook-grade analysis.</b>
 </p>
 
 <p align="center">
@@ -19,156 +19,105 @@
   <img alt="Joplin" src="https://img.shields.io/badge/Joplin-1071D3?logo=joplin&logoColor=white">
 </p>
 
-## At A Glance
+---
 
-- Open-source agentic stack with grounded retrieval and memory.
-- OpenWebUI frontend experience via the `:9099` research pipeline.
-- Joplin notebook sync pipeline for practical end-user workflows.
-- Configurable provider routing with local/remote endpoint support.
-- Roadmap includes full multi-user support in the next major version.
+## 📖 Overview
 
-## Quick Start
+`parsnip-ai` is an industrial-grade, self-hostable research assistant. It combines a LangGraph-powered orchestration engine, PostgreSQL/pgvector for long-term memory and retrieval, and a secure Python/R analysis sandbox. 
+
+Built with **privacy and data sovereignty** in mind, it is the ideal architecture for homelabs, enterprise environments, and public sector organizations that require strict control over their data and LLM routing.
+
+## ✨ Key Features
+
+- **Hybrid Ollama Stack:** Execute low-complexity tasks on local GPUs (e.g., `gemma4`, `qwen3.5`) and seamlessly route deep-reasoning tasks to Ollama Cloud (`kimi-k2.6`), eliminating per-token costs while maintaining speed.
+- **Grounded Generation (G-RAG):** Synthesizes live web search with curated, internal knowledge base grounding (Wikipedia, PDFs, News, arXiv).
+- **Agentic Memory:** Long-term persistence and session-aware context (L1-L4 memory architecture).
+- **Code Execution Sandbox:** A highly secure, isolated container for executing Python and R data science scripts, complete with artifact generation (charts, CSVs) and GCS backup.
+- **Joplin Integration:** Native, two-way sync with Joplin Server for practical, end-user notebook workflows.
+
+---
+
+## 🏗️ Architecture
+
+Parsnip relies on a decoupled, service-oriented architecture to ensure high availability and security.
+
+For detailed sequence diagrams, network topologies, and data flows, please see our [Architectural Visualizations](docs/ARCHITECTURE_VISUALS.md).
+
+```text
+[ OpenWebUI (Frontend) ] <--> [ Pipelines (Middleware) ] <--> [ Agent API (LangGraph) ]
+                                                                    |
+                                     +------------------------------+------------------------------+
+                                     |                              |                              |
+                            [ PostgreSQL (pgvector) ]     [ Analysis Server (Sandbox) ]   [ Ingestion Scheduler ]
+```
+
+---
+
+## 🚀 Quick Start & Deployment
+
+### 1. Configuration
+Copy the environment template and configure your keys and endpoints.
 
 ```bash
 cp .env.example .env
+```
 
-# Build locally (dev / hacking)
+**Example `.env` Configuration:**
+```ini
+# Core Database
+POSTGRES_PASSWORD=your_secure_password
+DATABASE_URL=postgresql://agent:${POSTGRES_PASSWORD}@localhost:5432/agent_kb
+
+# Hybrid Ollama Routing
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_API_KEY=your_ollama_cloud_key
+OLLAMA_CLOUD_URL=https://ollama.com/v1
+EMBED_MODEL=mxbai-embed-large
+
+# Local GPU Routing (Optional)
+GPU_LLM_URL=http://100.78.71.116:11434
+GPU_LLM_MODEL=gemma4:e4b
+
+# UI Security
+WEBUI_SECRET_KEY=generate_a_random_secure_string
+```
+
+### 2. Deployment
+Parsnip is packaged via Docker Compose for easy deployment.
+
+```bash
+# Build locally for development
 docker compose up -d --build
 
-# Or pull pre-built release images (faster)
+# Or use pre-built GHCR images for production
 IMAGE_TAG=0.1.0 docker compose up -d --no-build
 ```
 
-Default endpoints:
-- OpenWebUI: `http://localhost:3000`
-- Pipelines: `http://localhost:9099`
-- Agent API: `http://localhost:8000`
-- Agent docs: `http://localhost:8000/docs`
+**Access Points:**
+- **OpenWebUI:** `http://localhost:3000`
+- **Agent API Docs:** `http://localhost:8000/docs`
 
-## What It Is
+For advanced deployments (Kubernetes, GCP Cloud Run, AWS), refer to [DEPLOYMENT.md](docs/DEPLOYMENT.md) and [CLOUD_STORAGE_PLAN.md](docs/CLOUD_STORAGE_PLAN.md).
 
-`parsnip-ai` combines:
-- a tool-using LangGraph agent backend,
-- PostgreSQL/pgvector grounded retrieval and long-term memory,
-- extensible ingestion for public and private knowledge sources,
-- OpenWebUI + `:9099` pipelines routing,
-- optional notebook-style chart/report execution (Python and R).
+---
 
-It is built for teams that want full control over models, data, and deployment.
+## 🛡️ Security, Privacy & Enterprise Readiness
 
-## Why It’s Different
+Parsnip is designed to be **air-gappable**. By leveraging local Ollama instances for embeddings and LLM generation, no sensitive document data ever leaves your network. 
 
-- **Fully Open Source & Self-Hostable:** Every component, including the underlying LLMs, can be run on-premise.
-- **Truly Local Reasoning:** Optimized for **Moonshot AI / Kimi-k2.6** (available via Ollama), providing state-of-the-art analytical reasoning and coding capabilities in a fully private stack.
-- **Grounded Generation:** Traceable sources via explicit ingestion.
-- **Agentic Memory + Retrieval:** Long-term persistence and session-aware context.
-- **Hybrid RAG:** Synthesizes live web search with curated knowledge base grounding.
-- **Configurable Model Routing:** Dynamic complexity-based routing to local GPU models or remote providers via OpenRouter.
+**Guardrails in Place:**
+- **Aggressive Cost Control:** Built-in tool budgets, loop prevention, and context pruning ensure that runaway agent tasks are terminated before consuming excessive compute.
+- **Sandboxed Execution:** The Analysis server runs in a strictly isolated container to prevent malicious code execution from affecting the host or database.
+- **Persistent Disaster Recovery:** Automated, chron-triggered Parquet backups of the knowledge base and tarballs of the configuration to local disk or GCS.
 
-## Hybrid RAG: Web + KB Synthesis
+---
 
-Unlike traditional RAG that only retrieves from a static corpus, `parsnip-ai` performs **live web search** and **knowledge base grounding** in the same request, then synthesizes cross-source reports with explicit provenance.
+## 📚 Documentation Directory
 
-### Example: Space Exploration Report
-
-**Prompt:** "Search the web for latest space news (2025-2026), then search the KB for Apollo/NASA history. Synthesize a grounded report."
-
-**Output excerpt:**
-
-> **Historical Context:** The Space Race was ignited by the Soviet Union's launch of *Sputnik 1* in 1957, leading to NASA's creation in 1958 **[Source: Apollo 11 KB]**.
->
-> **Current Developments:** Artemis 1 tested uncrewed SLS/Orion; crewed missions face spacesuit/HLS delays **[Source: Web Search]**. In February 2026, SpaceX integrated xAI to accelerate AI-driven rocketry **[Source: SpaceX Updates]**.
->
-> **Synthesis:** Apollo proved lunar travel was possible; Artemis now aims to make it sustainable, using public-private partnerships to establish long-term lunar presence **[Source: NASA News]**.
-
-### Architecture
-
-```
-User Prompt
-    |
-    v
-[Web Search]  --->  Real-time articles, news, papers (2025-2026)
-    |                    |
-    |                    v
-[KB Search]   --->  Wikipedia grounding, historical context
-    |                    |
-    v                    v
-[Synthesis Node]  --->  Markdown report with [Source: X] tags
-    |
-    v
-[Joplin Export]  --->  Persistent note + joplin:// deep-link
-```
-
-### Try It Yourself
-
-```bash
-# Run the curated demo scenarios
-python scripts/run_demo.py
-
-# Or run a single scenario
-python scripts/run_demo.py --scenario space_exploration
-```
-
-See [docs/HYBRID_RAG.md](docs/HYBRID_RAG.md) for the full capabilities showcase.
-
-## Joplin Notebook Sync Pipeline
-
-Parsnip includes an end-user friendly integration path:
-- ingest personal or team notes into Joplin,
-- sync through the Joplin pipeline,
-- retrieve those notes in grounded responses and analysis workflows.
-
-This gives non-technical users a practical notebook frontend while keeping ingestion and retrieval architecture consistent with the rest of the platform.
-
-## Hybrid Ollama Stack
-
-Parsnip is optimized for a unified Ollama technology stack, enabling massive, high-complexity research without per-token costs:
-
-- **Local GPU:** Low and mid-complexity tasks (e.g., `gemma4:e4b`, `qwen3.5:4b`) are routed to your local Ollama instance.
-- **Ollama Cloud:** High-complexity reasoning tasks use a fixed-rate subscription for models like **Kimi-k2.6:cloud**.
-- **Automated Routing:** The agent intelligently switches between local and cloud endpoints based on the task tier, ensuring both speed and depth while maintaining fiscal responsibility.
-
-## Core Capabilities
-
-- ReAct-style tool orchestration.
-- Vector + FTS retrieval from `knowledge_chunks`.
-- Structured data routes (e.g., World Bank/FX analysis workflows).
-- Scheduled ingestion jobs (news, papers, notes).
-- OpenWebUI-compatible chat via pipelines middleware.
-- Optional analysis artifact generation (Python and R).
-
-## Repository Layout
-
-```text
-agent/          Backend agent API + tool graph
-analysis/       Analysis execution server
-ingestion/      Source ingestion scripts/pipelines
-scheduler/      Scheduled ingestion orchestration
-joplin-mcp/     Joplin bridge service
-db/             Database schema/init
-pipelines/      OpenWebUI pipelines connector
-docs/           Deployment, extension, and roadmap docs
-```
-
-## Configuration
-
-Runtime behavior is `.env`-driven:
-- `LLM_PROVIDER=openrouter|openai_compat`
-- OpenRouter keys/models or OpenAI-compatible base URL + API key
-- `OLLAMA_BASE_URL` for local or remote embeddings
-
-See [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
-
-## Docs
-
-- Deployment: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
-- Configuration: [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
-- Extension guide: [docs/EXTENDING.md](docs/EXTENDING.md)
-- Roadmap (including multi-user support): [docs/ROADMAP.md](docs/ROADMAP.md)
-- Branding assets: [docs/branding/README.md](docs/branding/README.md)
-- Architecture: [ARCHITECTURE.md](ARCHITECTURE.md)
-- Security: [SECURITY.md](SECURITY.md)
+- **Architecture & Visuals:** [ARCHITECTURE.md](ARCHITECTURE.md) | [ARCHITECTURE_VISUALS.md](docs/ARCHITECTURE_VISUALS.md) | [CLOUD_STORAGE_PLAN.md](docs/CLOUD_STORAGE_PLAN.md)
+- **Configuration & Setup:** [CONFIGURATION.md](docs/CONFIGURATION.md) | [DEPLOYMENT.md](docs/DEPLOYMENT.md)
+- **Extensibility:** [EXTENDING.md](docs/EXTENDING.md) | [HYBRID_RAG_SHOWCASE.md](docs/HYBRID_RAG_SHOWCASE.md)
+- **Future Roadmap:** [ROADMAP.md](docs/ROADMAP.md) | [future-dev.md](docs/future-dev-daryn.md)
 
 ## License
-
 Apache License 2.0. See [LICENSE](LICENSE).
