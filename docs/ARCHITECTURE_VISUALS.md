@@ -124,24 +124,27 @@ Retrieval tools should preserve source identifiers in their output so the respon
 
 ## 5. Model Routing and Fallbacks
 
-The agent resolves stable aliases such as `fast`, `smart`, and `reasoning` into concrete provider IDs. Local models are useful for private or low-latency work; cloud or OpenAI-compatible models can be used for larger synthesis tasks.
+The agent resolves stable aliases such as `fast`, `smart`, and `reasoning` into concrete provider IDs from `.env`. Local models are useful for private or low-latency work; cloud or OpenAI-compatible models can be used for larger synthesis tasks when explicitly configured.
 
 ```mermaid
 flowchart TB
-    Request[Agent needs model call] --> Resolve[Resolve alias or explicit model]
-    Resolve --> Backend{Backend available?}
+    Request[Agent needs model call] --> Alias[Alias requested<br/>fast, smart, reasoning, graph, classifier]
+    Alias --> Env[Resolve from .env<br/>FAST_MODEL, SMART_MODEL, REASONING_MODEL]
+    Env --> Backend{Configured backend?}
 
-    Backend -->|Local GPU enabled| Local[Local Ollama<br/>GPU host]
-    Backend -->|Ollama API key set| Cloud[Ollama Cloud<br/>OpenAI-compatible API]
-    Backend -->|OpenRouter key set| OpenRouter[OpenRouter fallback]
+    Backend -->|OLLAMA_BASE_URL / GPU_LLM_URL| Local[Local Ollama or GPU endpoint]
+    Backend -->|OLLAMA_CLOUD_URL| Cloud[Hosted Ollama-compatible API]
+    Backend -->|LLM_PROVIDER=openrouter| OpenRouter[OpenRouter]
+    Backend -->|LLM_PROVIDER=openai_compat| Compat[OpenAI-compatible endpoint]
 
     Local --> Invoke[Invoke model]
     Cloud --> Invoke
     OpenRouter --> Invoke
+    Compat --> Invoke
 
     Invoke --> Success{Succeeded?}
     Success -->|yes| Response[Return model output]
-    Success -->|rate limit or provider failure| Cascade[Try configured fallback chain]
+    Success -->|rate limit or provider failure| Cascade[Try next configured model in alias chain]
     Cascade --> Response
 ```
 

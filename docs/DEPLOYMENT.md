@@ -29,6 +29,10 @@ Verify:
 - OpenWebUI: `http://localhost:3000`
 - Agent: `http://localhost:8000/health`
 - Pipelines: `http://localhost:9099/`
+- Analysis server: `http://localhost:8095/health`
+- Joplin Server: `http://localhost:22300`
+- Joplin MCP: `http://localhost:8090`
+- SearXNG: `http://localhost:8080`
 
 ## Production Guidance
 
@@ -74,14 +78,26 @@ docker inspect pi_agent_postgres --format '{{json .Mounts}}'
 
 ### Backups
 
-The scheduler runs KB backups **4x daily** (00:00, 06:00, 12:00, 18:00 UTC) to GCS:
+The scheduler runs backups on startup and then on this UTC schedule:
+
+- Knowledge base and Joplin metadata: **02:00, 08:00, 14:00, 20:00**
+- Project configuration/code archive: **01:00 daily**
+
+Knowledge-base backups are uploaded to GCS when `GCS_BUCKET` is configured:
 - `gs://<bucket>/backups/latest/knowledge_chunks.parquet`
+- `gs://<bucket>/backups/latest/agent_memories.parquet`
+- `gs://<bucket>/backups/latest/joplin_items.parquet`
+- `gs://<bucket>/backups/latest/metadata.json`
 - Embeddings are included in the backup (since v0.1.0+)
+
+Configuration archives are uploaded to:
+- `gs://<bucket>/backups/config/latest.tar.gz`
 
 Run a manual backup:
 ```bash
 cd scripts
 python backup_kb.py
+python backup_config.py
 ```
 
 ### Recovery

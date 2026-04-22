@@ -1,124 +1,101 @@
-# Agent — LangGraph ReAct Backend
+# Agent Runtime
 
-FastAPI + LangGraph ReAct agent on port 8000. Connects to OpenRouter for LLM, Ollama for embeddings, PostgreSQL for vector search and checkpointing.
+FastAPI + LangGraph service on port `8000`. The agent owns tool orchestration,
+retrieval, long-term memory, conversation checkpoints, model invocation, and
+streaming responses back to the OpenWebUI pipeline adapter.
 
 ## Architecture
 
-```
+```text
 graph.py
-  └── StateGraph (ReAct loop)
-        ├── llm_node   — calls OpenRouter via ChatOpenAI (openai-compat)
-        └── tool_node  — dispatches to registered tools
+  -> StateGraph
+       -> llm_node    resolves configured model aliases and invokes provider
+       -> tool_node   dispatches registered LangChain tools
+       -> checkpointer persists conversation state in PostgreSQL
 ```
 
-**Checkpointer:** `AsyncPostgresSaver` with `AsyncConnectionPool` — persists conversation state across restarts. Pool opened in FastAPI lifespan context.
+The runtime uses OpenAI-compatible clients where possible. Provider-specific
+model IDs are not hardcoded in graph code; they are resolved from `.env` through
+`agent/config.py`.
 
-**Multi-Tier Routing (`tools/router.py`):**
-All complex queries go through a classification pipeline:
+## Configuration Contract
+
+Model routing uses stable aliases:
+
+- `FAST_MODEL`
+- `SMART_MODEL`
+- `REASONING_MODEL`
+- `GRAPH_MODEL`
+- `CLASSIFIER_MODEL`
+
+`DEFAULT_LLM` and `RESEARCH_LLM` can point at aliases such as `smart` and
+`reasoning`. Each alias can be a comma-separated fallback chain.
+
+Supported provider modes are documented in `../docs/CONFIGURATION.md`.
+
+## State and Memory
+
+| Layer | Storage | Purpose |
+|-------|---------|---------|
+| Conversation checkpoints | PostgreSQL checkpoint tables | Resume in-flight sessions across restarts. |
+| Long-term memory | `agent_memories` | Durable user/project facts. |
+| Knowledge retrieval | `knowledge_chunks` | Vector and full-text search over ingested sources. |
+| Structured datasets | Source-specific tables | Direct data access for forex and World Bank data. |
+
+The FastAPI lifespan context opens the async PostgreSQL connection pool used by
+LangGraph checkpointing.
+
+## Tooling
+
+The active tool list is defined in `agent/graph.py`. Tool implementations live
+under `agent/tools/` and include retrieval, memory, web search, source
+comparison, timeline retrieval, document reconstruction, Joplin operations, and
+analysis execution.
+
+Important retrieval entry points:
+
+| Tool | Purpose |
+|------|---------|
+| `holistic_search` | Layered knowledge retrieval across current, research, established, and personal sources. |
+| `adaptive_search` | Complexity-aware web + KB retrieval with optional HyDE and source expansion. |
+| `kb_search` | Targeted hybrid search against a specific source. |
+| `research` | Multi-query research with source synthesis. |
+| `get_document` | Reconstruct full content from a chunk source identifier. |
+| `timeline` | Chronological retrieval using published timestamps. |
+
+## Routing Behavior
+
+`agent/tools/router.py` classifies complex prompts by score, tier, and intent:
+
+```text
+User prompt -> classify_complexity() -> ComplexityResult(score, tier, intent)
 ```
-User prompt → classify_complexity() → ComplexityResult(score, tier, intent)
-  ├─ score 0.0–1.0 (LLM or heuristic fallback)
-  ├─ tier: low/mid/high → selects LLM model + search depth
-  └─ intent: code/research/current/general → selects KB layers
-```
-Configuration is exposed in `ROUTING_CONFIG` — weights, thresholds, LLM tiers, and search depths are all tunable without code changes.
 
-**Memory (4-layer MemPalace):**
+The tier controls model selection and search depth. Intent controls preferred
+knowledge layers, for example code-oriented prompts bias toward GitHub and
+research prompts bias toward arXiv/bioRxiv before broader sources.
 
-| Layer | What | When loaded |
-|-------|------|-------------|
-| L0 | System prompt / identity | Always |
-| L1 | Top-15 `agent_memories` by importance | Session start |
-| L2 | `save_memory` / `recall_memory` tools | On-demand |
-| L3 | `kb_search` / `research` tools | Explicit retrieval |
-
-## Tool Catalogue (18 tools)
-
-### Knowledge Retrieval
-
-| Tool | Description |
-|------|-------------|
-| `holistic_search` | **Default entry point.** Traverses all knowledge layers in priority order: news → arXiv/bioRxiv → Wikipedia → Joplin → GitHub. Intent-aware reordering: code queries route GitHub first with higher budget. |
-| `adaptive_search` | **Multi-tier routing with web-first + HyDE + KB fusion.** Pipeline: (1) classify complexity via small model, (2) web search always first, (3) HyDE generates hypothetical from web context (mid/high tiers), (4) KB search expands based on intent + tier depth. Use for complex queries needing current context and deep KB coverage. |
-| `kb_search` | Targeted hybrid search (semantic + BM25 RRF) against a specific source. |
-| `research` | Deep multi-query research with source synthesis and citation. |
-| `get_document` | Retrieve full content of a specific chunk by source + source_id. |
-| `find_similar` | Find chunks semantically similar to a given text. |
-| `compare_sources` | Compare how different sources cover the same topic. |
-| `timeline` | Chronological retrieval — orders results by `metadata.published_at`. |
-| `knowledge_gaps` | Identifies topics present in one source layer but absent in others. |
-
-### External Search
-
-| Tool | Description |
-|------|-------------|
-| `arxiv_search` | Live arXiv API search (not KB — fetches fresh results). |
-| `web_search` | Tavily or Brave web search. |
-
-### Memory
-
-| Tool | Description |
-|------|-------------|
-| `save_memory` | Write a fact to `agent_memories` with category + importance 1-5. |
-| `recall_memory` | Query `agent_memories` by category or keyword. |
-| `update_memory` | Update content or importance of an existing memory. |
-| `delete_memory` | Soft-delete a memory (sets `deleted_at`). |
-
-### Joplin Notes
-
-| Tool | Description |
-|------|-------------|
-| `list_joplin_notebooks` | List all notebooks in Joplin Server. |
-| `create_joplin_note` | Create a new note (Markdown; Mermaid blocks render natively). |
-| `update_joplin_note` | Update an existing note by ID. |
-| `search_joplin_notes` | Search notes by keyword via Joplin Server API. |
+Thresholds, layer budgets, and intent/source mappings are in
+`agent/tools/router.py`. Concrete model choices remain in `.env`.
 
 ## Adding a New Tool
 
 1. Create `agent/tools/<name>.py` with a `@tool` decorated async function.
-2. Import and add to `__all__` in `agent/tools/__init__.py`.
-3. Add to the `TOOLS` list in `agent/graph.py`.
-4. Add a one-line description to the decision guide at the bottom of `BASE_PROMPT` in `graph.py`.
+2. Import and export it in `agent/tools/__init__.py`.
+3. Add it to the `TOOLS` list in `agent/graph.py`.
+4. Add concise guidance to `BASE_PROMPT` in `agent/graph.py` if the model needs
+   to know when to use it.
+5. Add tests for behavior that affects routing, persistence, or user-visible
+   output.
 
-## holistic_search — Knowledge Horizon Retrieval
+## Adding a New Knowledge Source
 
-The core innovation: query expansion + layered retrieval ordered by temporal recency.
+If the new source is searchable through the knowledge base:
 
-```python
-_LAYERS = [
-    ("Current Events",        ["news"],              4,  30),   # last 30 days
-    ("Research Frontier",     ["arxiv", "biorxiv"],  4,  None),
-    ("Established Knowledge", ["wikipedia"],         3,  None),
-    ("Your Notes",            ["joplin_notes"],      2,  None),
-]
-```
-
-Each layer runs in parallel with 3 query variants (original + 2 expansions generated by the LLM). Results are merged per layer, formatted with horizon headers, and returned as a single coherent response. Layers with no results are silently skipped.
-
-## Routing Configuration (`tools/router.py`)
-
-The `ROUTING_CONFIG` dict exposes all tunable parameters:
-
-```python
-ROUTING_CONFIG = {
-    "thresholds": {"simple": 0.3, "moderate": 0.6},  # complexity score → tier
-    "llm_tiers": {"low": ..., "mid": ..., "high": ...},  # model per tier
-    "weights": {  # heuristic scoring weights
-        "length": 0.15, "multi_question": 0.25, "technical_terms": 0.20,
-        "comparison": 0.15, "synthesis": 0.15, "temporal": 0.10,
-    },
-    "search_depth": {  # params per tier
-        "low":  {"web_results": 3, "hyde": False, "kb_layers": 1, ...},
-        "mid":  {"web_results": 5, "hyde": True,  "kb_layers": 3, ...},
-        "high": {"web_results": 8, "hyde": True,  "kb_layers": 5, ...},
-    },
-    "intent_layers": {  # KB sources per intent
-        "code": ["github", "wikipedia", ...],
-        "research": ["arxiv", "biorxiv", ...],
-        ...
-    },
-    "layer_budgets": {"github": 6, "arxiv": 4, ...},  # max results per source
-}
-```
-
-Add new ingestion pipelines by adding entries to `intent_layers` and `layer_budgets`.
+1. Add or update the ingestion pipeline under `ingestion/`.
+2. Keep the `source` column value stable and unique.
+3. Register source-specific embedding behavior in `agent/tools/kb_search.py` if
+   it does not use the default text embedder.
+4. Update router source mappings and holistic-search layers where the new source
+   should appear.
+5. Document the source in `../ingestion/README.md`.

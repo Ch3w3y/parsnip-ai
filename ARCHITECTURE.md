@@ -1,73 +1,122 @@
 # Architecture
 
+Parsnip is a local-first research and knowledge platform built around OpenWebUI,
+a FastAPI/LangGraph agent runtime, PostgreSQL with pgvector, scheduled ingestion,
+and optional analysis/Joplin integrations.
+
 ## High-Level Topology
 
 ```mermaid
-graph TD
-    User((User)) -->|Browser| OWUI[OpenWebUI :3000]
-    OWUI -->|SSE Stream| Pipe[Research Pipeline :9099]
-    Pipe -->|Chat/Sync| Agent[Agent API :8000]
-    
-    subgraph "Agentic Core (LangGraph)"
-        Agent --> Graph[Tool Orchestration Graph]
-        Graph --> Memory[PostgreSQL Memory L1-L4]
+flowchart TD
+    User((User)) -->|Browser| OWUI[OpenWebUI<br/>:3000]
+    OWUI -->|OpenAI-compatible stream| Pipe[Pipelines adapter<br/>:9099]
+    Pipe -->|Chat and tool requests| Agent[Agent API<br/>:8000]
+
+    subgraph Runtime[Agent runtime]
+        Agent --> Graph[LangGraph orchestration]
+        Graph --> Tools[Tool router]
+        Graph --> Memory[Long-term memory]
+        Graph --> Checkpoints[Conversation checkpoints]
     end
 
-    subgraph "Support Services"
-        Graph --> Analysis[Analysis Server :8095]
-        Graph --> Joplin[Joplin MCP :8090]
-        Graph --> Search[SearXNG Meta-Search :8080]
-        Graph --> Vector[pgvector Retrieval]
+    subgraph Data[Primary data services]
+        PG[(PostgreSQL + pgvector)]
+        KB[knowledge_chunks]
+        Jobs[ingestion_jobs]
+        AM[agent_memories]
     end
 
-    subgraph "LLM Routing (Hybrid Ollama)"
-        Graph -->|Low/Mid Complexity| LocalOllama[Local GPU Ollama]
-        Graph -->|High Complexity| CloudOllama[Ollama Cloud Subscription]
+    subgraph Integrations[Tool targets]
+        Tools --> Search[SearXNG / external search]
+        Tools --> Analysis[Analysis server<br/>:8095]
+        Tools --> Joplin[Joplin MCP<br/>:8090]
+        Tools --> GitHub[GitHub tools]
     end
+
+    Memory --> AM
+    Checkpoints --> PG
+    Tools --> KB
+    Scheduler[Scheduler] --> Jobs
+    Scheduler --> KB
+    KB --> PG
+    Jobs --> PG
+    AM --> PG
 ```
+
+OpenWebUI owns the browser experience. The Agent API owns orchestration,
+retrieval, memory, tool execution, and model selection.
 
 ## Main Services
 
-- `agent`: tool-orchestrating API for retrieval, synthesis, and workflow execution.
-- `pipelines`: OpenWebUI-compatible middleware for model/tool routing.
-- `analysis`: optional execution runtime for Python/R workloads.
-- `scheduler`: recurring ingestion and maintenance jobs.
-- `postgres`: primary storage for vectors, memories, and ingestion metadata.
-- `joplin-mcp`: optional integration bridge for note-based ingestion/output.
+- `agent`: FastAPI service for retrieval, synthesis, memory, and tool workflows.
+- `pipelines`: OpenWebUI-compatible adapter that forwards chat traffic to the agent.
+- `analysis`: optional execution service for Python/R workloads and generated artifacts.
+- `scheduler`: recurring ingestion, Joplin sync safety jobs, and backup jobs.
+- `postgres`: primary store for vectors, memories, checkpoints, structured data, and Joplin's database.
+- `joplin` / `joplin-mcp`: optional note server and integration bridge.
+- `searxng`: local metasearch endpoint used when configured.
 
 ## Data Model Highlights
 
-- `knowledge_chunks`: chunked content + embeddings for retrieval.
-- `agent_memories`: durable memory records for cross-session context.
-- `ingestion_jobs`: ingestion run state and progress tracking.
+- `knowledge_chunks`: chunked source text, metadata, embeddings, and per-source identifiers.
+- `agent_memories`: durable memory records used across sessions.
+- `ingestion_jobs`: ingestion run state, progress, and resume tracking.
+- LangGraph checkpoint tables: persisted conversation state.
+- Structured tables such as `forex_rates` and `world_bank_data`.
 
 ## Ingestion Pattern
 
 Ingestion pipelines follow a fetch/process split:
-1. Fetch source payloads.
-2. Persist raw landing artifacts.
-3. Transform/chunk/embed.
-4. Upsert into structured/vector tables.
 
-This allows replay on downstream failures without re-fetching upstream APIs.
+1. Fetch source payloads.
+2. Persist raw landing artifacts where applicable.
+3. Normalize, chunk, and embed records.
+4. Upsert into structured/vector tables.
+5. Record progress in `ingestion_jobs`.
+
+This keeps source fetching separate from embedding and database writes, so failed
+processing can be replayed without re-hitting upstream APIs.
 
 ## Model Routing and Backends
 
-Runtime backend selection is hybrid and adaptive:
-- **All-Ollama Stack (Preferred):** Hybrid local/cloud topology leveraging `OLLAMA_BASE_URL` (local GPU) for low/mid complexity tasks and `OLLAMA_CLOUD_URL` (subscription) for high-complexity reasoning (e.g., `kimi-k2.6:cloud`).
-- `LLM_PROVIDER=openrouter`: Traditional per-token usage across 100+ models.
-- `LLM_PROVIDER=openai_compat`: Custom OpenAI-compatible API endpoints.
+Concrete model IDs are deployment configuration, not code. The runtime resolves
+stable aliases from `.env`:
 
-## Agentic Guardrails & Cost Control
+- `FAST_MODEL`
+- `SMART_MODEL`
+- `REASONING_MODEL`
+- `GRAPH_MODEL`
+- `CLASSIFIER_MODEL`
 
-To ensure fiscal responsibility and prevent infinite tool loops:
-- **Adaptive Tool Budgets:** Stricter limits based on task complexity (e.g., 25 calls for 'high' tier).
-- **Loop Prevention:** Aggressive detection for repeated tool calls with identical arguments (limit: 2).
-- **Context Pruning:** Automatic truncation of large tool outputs (>12k chars) and middle-history message dropping once sessions exceed 25 messages.
-- **Graph Recursion Safety:** Capped at 50 nodes to prevent runaway reasoning cycles.
+Each alias can be a comma-separated fallback chain. `DEFAULT_LLM` and
+`RESEARCH_LLM` may point at either explicit model IDs or aliases such as `smart`
+and `reasoning`.
+
+Supported backend modes:
+
+- `LLM_PROVIDER=openrouter`: OpenRouter-hosted models.
+- `LLM_PROVIDER=openai_compat`: any OpenAI-compatible endpoint.
+- Ollama-compatible local/cloud endpoints through `OLLAMA_BASE_URL`,
+  `OLLAMA_CLOUD_URL`, `OLLAMA_API_KEY`, and optional GPU routing variables.
+
+Provider failover is explicit: sensitive workloads do not silently move to an
+external provider unless that provider is configured in `.env`.
+
+## Runtime Guardrails and Cost Control
+
+- Adaptive tool budgets by complexity tier.
+- Repeated-tool-call detection for identical arguments.
+- Context pruning for oversized tool output and long message histories.
+- LangGraph recursion caps to prevent runaway loops.
+- Required model aliases validated at startup.
 
 ## Deployment Posture
 
-- Local-first Docker Compose baseline.
-- Provider-flexible deployment (VM, managed DB, cloud object storage optional).
-- GCP can be productionized directly; AWS/Azure parity patterns documented in `docs/DEPLOYMENT.md`.
+- Docker Compose is the baseline for local and single-VM deployments.
+- PostgreSQL data must live on block storage, not object storage.
+- GCS is supported for backup artifacts and analysis outputs when configured.
+- Managed PostgreSQL, VM/container hosts, and cloud object storage can be used by
+  supplying the relevant `.env` values.
+
+See `docs/ARCHITECTURE_VISUALS.md`, `docs/CONFIGURATION.md`, and
+`docs/DEPLOYMENT.md` for operational diagrams and deployment detail.
