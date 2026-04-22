@@ -39,10 +39,18 @@ This allows replay on downstream failures without re-fetching upstream APIs.
 
 ## Model Routing and Backends
 
-Runtime backend selection is environment-driven:
-- `LLM_PROVIDER=openrouter` (default)
-- `LLM_PROVIDER=openai_compat` (OpenAI-compatible API endpoint)
-- Embeddings via `OLLAMA_BASE_URL` (local or remote)
+Runtime backend selection is hybrid and adaptive:
+- **All-Ollama Stack (Preferred):** Hybrid local/cloud topology leveraging `OLLAMA_BASE_URL` (local GPU) for low/mid complexity tasks and `OLLAMA_CLOUD_URL` (subscription) for high-complexity reasoning (e.g., `kimi-k2.6:cloud`).
+- `LLM_PROVIDER=openrouter`: Traditional per-token usage across 100+ models.
+- `LLM_PROVIDER=openai_compat`: Custom OpenAI-compatible API endpoints.
+
+## Agentic Guardrails & Cost Control
+
+To ensure fiscal responsibility and prevent infinite tool loops:
+- **Adaptive Tool Budgets:** Stricter limits based on task complexity (e.g., 25 calls for 'high' tier).
+- **Loop Prevention:** Aggressive detection for repeated tool calls with identical arguments (limit: 2).
+- **Context Pruning:** Automatic truncation of large tool outputs (>12k chars) and middle-history message dropping once sessions exceed 25 messages.
+- **Graph Recursion Safety:** Capped at 50 nodes to prevent runaway reasoning cycles.
 
 ## Deployment Posture
 

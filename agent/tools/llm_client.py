@@ -20,6 +20,8 @@ import os
 
 import httpx
 
+from config import get_settings, MODEL_ALIASES
+
 logger = logging.getLogger(__name__)
 
 
@@ -68,10 +70,11 @@ async def llm_call(
             payload["response_format"] = response_format
         return payload
 
-    gpu_url = os.environ.get("GPU_LLM_URL", "")
-    gpu_model = os.environ.get("GPU_LLM_MODEL", "")
-    gpu_enabled = bool(gpu_url and gpu_model)
-    openrouter_key = os.environ.get("OPENROUTER_API_KEY", "")
+    settings = get_settings()
+    gpu_url = settings.gpu_llm_url
+    gpu_model = settings.gpu_llm_model
+    gpu_enabled = settings.gpu_llm_enabled
+    openrouter_key = settings.openrouter_api_key
 
     # Determine target backend
     use_gpu = False
@@ -87,9 +90,7 @@ async def llm_call(
         target_model = gpu_model
     else:
         # Complex tasks or no GPU → OpenRouter
-        target_model = model or os.environ.get(
-            "DEFAULT_LLM", "google/gemini-2.0-flash-001"
-        )
+        target_model = model or MODEL_ALIASES["fast"][0]
 
     # Try GPU Ollama first if applicable
     if use_gpu:
@@ -111,7 +112,7 @@ async def llm_call(
         return None
 
     if not target_model:
-        target_model = "google/gemini-2.0-flash-001"
+        target_model = MODEL_ALIASES["fast"][0]
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
