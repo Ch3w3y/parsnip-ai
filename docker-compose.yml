@@ -229,6 +229,7 @@ services:
       GOOGLE_APPLICATION_CREDENTIALS: /app/gcs-key.json
     volumes:
       - ./gcs-key.json:/app/gcs-key.json:ro
+      - ./ingestion/data:/app/ingestion/data
     depends_on:
       postgres:
         condition: service_healthy

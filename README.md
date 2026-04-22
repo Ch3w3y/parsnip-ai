@@ -120,6 +120,14 @@ Parsnip includes an end-user friendly integration path:
 
 This gives non-technical users a practical notebook frontend while keeping ingestion and retrieval architecture consistent with the rest of the platform.
 
+## Hybrid Ollama Stack
+
+Parsnip is optimized for a unified Ollama technology stack, enabling massive, high-complexity research without per-token costs:
+
+- **Local GPU:** Low and mid-complexity tasks (e.g., `gemma4:e4b`, `qwen3.5:4b`) are routed to your local Ollama instance.
+- **Ollama Cloud:** High-complexity reasoning tasks use a fixed-rate subscription for models like **Kimi-k2.6:cloud**.
+- **Automated Routing:** The agent intelligently switches between local and cloud endpoints based on the task tier, ensuring both speed and depth while maintaining fiscal responsibility.
+
 ## Core Capabilities
 
 - ReAct-style tool orchestration.
