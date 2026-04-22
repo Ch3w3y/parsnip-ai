@@ -33,6 +33,11 @@ scripts/.kb_report_note_id
 
 # Logs
 *.log
+nohup.out
+
+# Local scratch files
+expressions.txt
+scripts/test_news.py
 
 # Editor
 .idea/
