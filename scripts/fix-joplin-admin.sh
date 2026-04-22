@@ -9,7 +9,7 @@
 
 set -e
 
-DB_HOST="${POSTGRES_HOST:-pi_agent_postgres}"
+DB_HOST="${POSTGRES_HOST:-localhost}"
 DB_PORT="${POSTGRES_PORT:-5432}"
 DB_NAME="${POSTGRES_DATABASE:-joplin}"
 DB_USER="${POSTGRES_USER:-agent}"

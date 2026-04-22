@@ -40,7 +40,8 @@ EMBED_MODEL = os.environ.get("EMBED_MODEL", "mxbai-embed-large")
 
 async def fetch_missing_chunks(conn, batch_size: int):
     """Yield batches of (id, content) tuples that need embeddings."""
-    async with conn.cursor() as cur:
+    # Use a named cursor for server-side streaming
+    async with conn.cursor(name="reembed_stream") as cur:
         await cur.execute(
             "SELECT id, content FROM knowledge_chunks WHERE embedding IS NULL ORDER BY id"
         )
@@ -121,6 +122,13 @@ async def main():
 
     async for batch in fetch_missing_chunks(conn, args.batch_size):
         if args.limit and processed >= args.limit:
+            break
+            
+        # Ensure we don't exceed limit in the last batch
+        if args.limit and (processed + len(batch)) > args.limit:
+            batch = batch[:(args.limit - processed)]
+
+        if not batch:
             break
 
         ids = [row[0] for row in batch]
