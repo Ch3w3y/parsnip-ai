@@ -483,13 +483,10 @@ def _try_gpu_fallback(messages, tools, streaming):
 
 
 def _invoke_with_fallback(llm, messages, tools: list | None = None, tier: str = "mid"):
-    """Invoke LLM; on OpenRouter rate-limit, cascade down model tiers.
+    """Invoke LLM; on failure/rate-limit, cascade down model tiers using the hybrid router.
 
-    Order: same-tier → mid-tier → low/free-tier (OpenRouter) → GPU Ollama (final net).
-    GPU is reserved for embeddings + low-tier safety-net only.
+    Order: same-tier → mid-tier → low/free-tier (Local GPU/Cloud).
     """
-    from config import get_settings
-
     settings = get_settings()
     current_model = getattr(llm, "model_name", "")
     fallback_chain = _get_cascading_fallbacks(current_model, tier)
@@ -497,18 +494,10 @@ def _invoke_with_fallback(llm, messages, tools: list | None = None, tier: str = 
 
     # If circuit is open, jump straight to fallbacks (skip primary model entirely)
     if _circuit_is_open():
+        logger.warning("Primary model circuit is OPEN. Skipping to fallbacks.")
         for fallback_id in fallback_chain:
             logger.info(f"Circuit open — trying fallback model {fallback_id}")
-            fallback_llm = ChatOpenAI(
-                model=fallback_id,
-                base_url="https://openrouter.ai/api/v1",
-                api_key=settings.openrouter_api_key,
-                streaming=streaming,
-                default_headers={
-                    "HTTP-Referer": "https://github.com/pi-agent",
-                    "X-Title": "pi-agent",
-                },
-            )
+            fallback_llm = _get_llm(model=fallback_id, streaming=streaming)
             if tools:
                 fallback_llm = fallback_llm.bind_tools(tools)
             try:
@@ -516,13 +505,15 @@ def _invoke_with_fallback(llm, messages, tools: list | None = None, tier: str = 
             except Exception as e2:
                 logger.warning(f"Fallback {fallback_id} failed: {e2}")
                 continue
+        
         # Final safety net: GPU Ollama
         gpu_result = _try_gpu_fallback(messages, tools, streaming)
         if gpu_result is not None:
             return gpu_result
+            
         raise RuntimeError(
-            "OpenRouter circuit is open and all fallback models (including GPU) failed. "
-            "Please check your API quota or wait for cooldown."
+            "Model circuit is open and all fallback options (including GPU) failed. "
+            "Please check your Ollama Cloud subscription or local GPU status."
         )
 
     try:
@@ -530,19 +521,10 @@ def _invoke_with_fallback(llm, messages, tools: list | None = None, tier: str = 
     except Exception as e:
         if _is_rate_limit_error(e):
             _trip_circuit()
-            logger.warning(f"OpenRouter blocked ({e}). Cascading through fallback chain ...")
+            logger.warning(f"Primary model blocked ({e}). Cascading through fallback chain ...")
             for fallback_id in fallback_chain:
                 logger.info(f"Retrying with fallback model {fallback_id}")
-                fallback_llm = ChatOpenAI(
-                    model=fallback_id,
-                    base_url="https://openrouter.ai/api/v1",
-                    api_key=settings.openrouter_api_key,
-                    streaming=streaming,
-                    default_headers={
-                        "HTTP-Referer": "https://github.com/pi-agent",
-                        "X-Title": "pi-agent",
-                    },
-                )
+                fallback_llm = _get_llm(model=fallback_id, streaming=streaming)
                 if tools:
                     fallback_llm = fallback_llm.bind_tools(tools)
                 try:
@@ -552,11 +534,12 @@ def _invoke_with_fallback(llm, messages, tools: list | None = None, tier: str = 
                 except Exception as e2:
                     logger.warning(f"Fallback {fallback_id} failed: {e2}")
                     continue
+            
             # Final safety net: GPU Ollama
             gpu_result = _try_gpu_fallback(messages, tools, streaming)
             if gpu_result is not None:
                 return gpu_result
-            logger.error("All OpenRouter fallback models exhausted; GPU fallback also failed")
+            logger.error("All fallback models exhausted; GPU fallback also failed")
         raise
 
 
@@ -587,15 +570,23 @@ def _get_llm(model: str | None = None, streaming: bool = True) -> ChatOpenAI:
             streaming=streaming,
         )
 
-    return ChatOpenAI(
-        model=selected,
-        base_url="https://openrouter.ai/api/v1",
-        api_key=os.environ["OPENROUTER_API_KEY"],
-        streaming=streaming,
-        default_headers={
-            "HTTP-Referer": "https://github.com/pi-agent",
-            "X-Title": "pi-agent",
-        },
+    # If GPU is disabled, fall back to OpenRouter ONLY if a key exists
+    openrouter_key = os.environ.get("OPENROUTER_API_KEY")
+    if openrouter_key:
+        return ChatOpenAI(
+            model=selected,
+            base_url="https://openrouter.ai/api/v1",
+            api_key=openrouter_key,
+            streaming=streaming,
+            default_headers={
+                "HTTP-Referer": "https://github.com/pi-agent",
+                "X-Title": "pi-agent",
+            },
+        )
+
+    raise RuntimeError(
+        f"No LLM backend available for model '{selected}'. "
+        "Please enable GPU_LLM or provide OLLAMA_API_KEY/OPENROUTER_API_KEY."
     )
 
 
@@ -628,6 +619,7 @@ ANALYSIS_TOOL_NAMES = {
 
 
 def _latest_user_text(messages: list[BaseMessage]) -> str:
+    """Extract text from the most recent human message."""
     for msg in reversed(messages):
         if isinstance(msg, HumanMessage):
             return str(msg.content or "")
@@ -903,23 +895,34 @@ def _prune_messages(messages: list[BaseMessage], max_tool_chars: int = 12000) ->
         pruned.append(msg)
 
     # If history is getting very long, drop middle messages but keep context
-    # (Keep System + First User Msg + Last 15 messages)
+    # (Keep System + First User Msg + Last 20 messages, aligned to tool boundaries)
     if len(pruned) > 25:
-        # Find first human message
+        # Find first human message to keep head
         first_user_idx = -1
         for i, m in enumerate(pruned):
             if isinstance(m, HumanMessage):
                 first_user_idx = i
                 break
         
-        if first_user_idx != -1:
-            head = pruned[:first_user_idx + 1]
-            tail = pruned[-20:]
-            # Ensure tail starts with an AIMessage if it follows a ToolMessage from head
-            # but LangGraph usually handles this.
-            pruned = head + [HumanMessage(content="[... older history omitted to save context ...]")] + tail
-        else:
-            pruned = pruned[:1] + pruned[-20:]
+        # Keep head: system + first user
+        head = pruned[:first_user_idx + 1] if first_user_idx != -1 else pruned[:1]
+        
+        # Take tail and align: must start with an AIMessage or HumanMessage, 
+        # NOT a ToolMessage or a paired AIMessage with tool_calls.
+        tail_size = 20
+        tail_start_idx = len(pruned) - tail_size
+        
+        # Walk backward to find a clean break point (HumanMessage or non-tool AIMessage)
+        while tail_start_idx < len(pruned) - 1:
+            m = pruned[tail_start_idx]
+            if isinstance(m, HumanMessage):
+                break
+            if isinstance(m, AIMessage) and not m.tool_calls:
+                break
+            tail_start_idx += 1
+            
+        tail = pruned[tail_start_idx:]
+        pruned = head + [HumanMessage(content="[... older history omitted to save context ...]")] + tail
 
     return pruned
 
