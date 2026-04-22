@@ -82,6 +82,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     thread_id: str
     content: str
+    model_id: str = ""
 
 
 class SessionSave(BaseModel):
@@ -157,7 +158,8 @@ async def chat_stream(req: ChatRequest):
             logger.exception("Stream error")
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
         finally:
-            yield f"data: {json.dumps({'type': 'done', 'thread_id': thread_id})}\n\n"
+            resolved_model = settings.resolve_model(req.model or settings.default_llm)
+            yield f"data: {json.dumps({'type': 'done', 'thread_id': thread_id, 'model_id': resolved_model})}\n\n"
 
     return StreamingResponse(
         event_stream(),
@@ -195,7 +197,11 @@ async def chat_sync(req: ChatRequest):
 
     result = await agent.ainvoke(state, config={**config, "recursion_limit": 50})
     last = result["messages"][-1]
-    return ChatResponse(thread_id=thread_id, content=last.content)
+    
+    # Resolve the model ID for logging/UI
+    resolved_model = settings.resolve_model(req.model or settings.default_llm)
+    
+    return ChatResponse(thread_id=thread_id, content=last.content, model_id=resolved_model)
 
 
 @app.get("/threads/{thread_id}")
