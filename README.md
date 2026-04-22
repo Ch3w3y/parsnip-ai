@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <b>A fully open-source, air-gappable agentic research stack designed for privacy, grounded retrieval, and notebook-grade analysis.</b>
+  <b>Self-hosted research infrastructure for grounded retrieval, notebook-grade analysis, and private model routing.</b>
 </p>
 
 <p align="center">
@@ -19,105 +19,153 @@
   <img alt="Joplin" src="https://img.shields.io/badge/Joplin-1071D3?logo=joplin&logoColor=white">
 </p>
 
----
+## Overview
 
-## 📖 Overview
+`parsnip-ai` is a Docker Compose stack for running a private research assistant with persistent retrieval, long-term memory, scheduled ingestion, and a controlled Python/R analysis environment. It is designed for operators who want the convenience of a chat interface without giving up control of data storage, model routing, or analysis artifacts.
 
-`parsnip-ai` is an industrial-grade, self-hostable research assistant. It combines a LangGraph-powered orchestration engine, PostgreSQL/pgvector for long-term memory and retrieval, and a secure Python/R analysis sandbox. 
+The stack combines OpenWebUI, a pipeline adapter, a LangGraph-based agent API, PostgreSQL with pgvector/vectorscale, a Joplin Server integration, SearXNG, and a sandboxed analysis server. It can run fully local for private deployments, or route selected model calls to an OpenAI-compatible endpoint such as Ollama Cloud when higher-capacity reasoning is required.
 
-Built with **privacy and data sovereignty** in mind, it is the ideal architecture for homelabs, enterprise environments, and public sector organizations that require strict control over their data and LLM routing.
+## What It Provides
 
-## ✨ Key Features
+- Grounded retrieval over local knowledge sources, including Wikipedia dumps, RSS/news feeds, arXiv, bioRxiv/medRxiv, PDFs, Joplin notes, forex rates, and World Bank data.
+- Hybrid search using vector retrieval, full-text search, metadata filters, timeline retrieval, source comparison, and document reconstruction.
+- Persistent conversation state and long-term memory stored in PostgreSQL.
+- Python, R, notebook, and dashboard execution through a separate analysis service with artifact capture.
+- Two-way Joplin workflows for notes, notebooks, resources, reports, and generated research outputs.
+- Scheduled ingestion and backups for repeatable operations.
+- Model routing that can use local Ollama, Ollama Cloud, OpenRouter, or another OpenAI-compatible backend depending on configuration.
 
-- **Hybrid Ollama Stack:** Execute low-complexity tasks on local GPUs (e.g., `gemma4`, `qwen3.5`) and seamlessly route deep-reasoning tasks to Ollama Cloud (`kimi-k2.6`), eliminating per-token costs while maintaining speed.
-- **Grounded Generation (G-RAG):** Synthesizes live web search with curated, internal knowledge base grounding (Wikipedia, PDFs, News, arXiv).
-- **Agentic Memory:** Long-term persistence and session-aware context (L1-L4 memory architecture).
-- **Code Execution Sandbox:** A highly secure, isolated container for executing Python and R data science scripts, complete with artifact generation (charts, CSVs) and GCS backup.
-- **Joplin Integration:** Native, two-way sync with Joplin Server for practical, end-user notebook workflows.
+## Architecture
 
----
-
-## 🏗️ Architecture
-
-Parsnip relies on a decoupled, service-oriented architecture to ensure high availability and security.
-
-For detailed sequence diagrams, network topologies, and data flows, please see our [Architectural Visualizations](docs/ARCHITECTURE_VISUALS.md).
+The runtime path is intentionally split into small services:
 
 ```text
-[ OpenWebUI (Frontend) ] <--> [ Pipelines (Middleware) ] <--> [ Agent API (LangGraph) ]
-                                                                    |
-                                     +------------------------------+------------------------------+
-                                     |                              |                              |
-                            [ PostgreSQL (pgvector) ]     [ Analysis Server (Sandbox) ]   [ Ingestion Scheduler ]
+Browser
+  -> OpenWebUI
+  -> Pipelines adapter
+  -> Agent API
+  -> tools, retrieval, memory, analysis, notebook sync, web search
 ```
 
----
+PostgreSQL is the main durable store. It holds knowledge chunks, embeddings, ingestion jobs, memory records, and LangGraph checkpoint state. Joplin Server uses its own database for notebook data. The analysis service writes generated files to a mounted output volume and can archive artifacts to object storage.
 
-## 🚀 Quick Start & Deployment
+For detailed diagrams, see [docs/ARCHITECTURE_VISUALS.md](docs/ARCHITECTURE_VISUALS.md).
 
-### 1. Configuration
-Copy the environment template and configure your keys and endpoints.
+## Core Services
+
+| Service | Default port | Purpose |
+| --- | ---: | --- |
+| OpenWebUI | `3000` | Browser UI and user-facing chat surface |
+| Pipelines | `9099` | OpenWebUI-compatible adapter for the research agent |
+| Agent API | `8000` | LangGraph orchestration, tools, memory, and streaming chat |
+| PostgreSQL | `5432` | Knowledge base, vectors, memories, checkpoints, ingestion state |
+| Analysis Server | `8095` | Python/R/notebook execution and artifact serving |
+| Joplin Server | `22300` | Notebook storage and user-facing note sync |
+| Joplin MCP | `8090` | Tool bridge for notebook operations |
+| SearXNG | `8080` | Local metasearch provider |
+| Scheduler | n/a | News, arXiv, Joplin, forex, World Bank, backup, and Wikipedia jobs |
+
+## Model Routing
+
+Model selection is configured in [agent/config.py](agent/config.py). The agent accepts stable aliases such as `fast`, `smart`, `reasoning`, and `classifier`, then resolves them to provider-specific model IDs.
+
+Supported routing patterns:
+
+- Local Ollama for private low-latency inference.
+- Ollama Cloud or another OpenAI-compatible endpoint for larger models.
+- OpenRouter as a fallback provider when configured.
+- Local embeddings through `mxbai-embed-large` by default.
+
+The fallback path is explicit: if a primary model is unavailable or rate-limited, the agent cascades through configured alternatives before failing the request.
+
+## Data and Ingestion
+
+The ingestion layer stores raw or structured source data first, then chunks and embeds content into `knowledge_chunks`. This keeps retrieval rebuilds separate from external API fetches and allows schema repairs without re-downloading upstream data.
+
+Important tables:
+
+- `knowledge_chunks`: content, metadata, embeddings, source IDs, and chunk indexes.
+- `ingestion_jobs`: job state and resumability for scheduled and bulk ingestion.
+- `agent_memories`: durable long-term memory records.
+- `forex_rates` and `world_bank_data`: structured datasets for direct analysis queries.
+
+Large datasets should live under `ingestion/data/`, which is intentionally ignored by git.
+
+## Quick Start
+
+Prerequisites:
+
+- Docker and Docker Compose.
+- A configured `.env` file.
+- Local Ollama or a compatible remote model endpoint.
+- Optional: Google Cloud Storage credentials for backup/archive workflows.
+
+Configure the environment:
 
 ```bash
 cp .env.example .env
 ```
 
-**Example `.env` Configuration:**
+Minimum useful settings:
+
 ```ini
-# Core Database
-POSTGRES_PASSWORD=your_secure_password
+POSTGRES_PASSWORD=replace-with-a-strong-password
 DATABASE_URL=postgresql://agent:${POSTGRES_PASSWORD}@localhost:5432/agent_kb
 
-# Hybrid Ollama Routing
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_API_KEY=your_ollama_cloud_key
-OLLAMA_CLOUD_URL=https://ollama.com/v1
 EMBED_MODEL=mxbai-embed-large
 
-# Local GPU Routing (Optional)
-GPU_LLM_URL=http://your-local-gpu-ip:11434
-GPU_LLM_MODEL=gemma4:e4b
-
-# UI Security
-WEBUI_SECRET_KEY=generate_a_random_secure_string
+WEBUI_SECRET_KEY=replace-with-a-random-secret
 ```
 
-### 2. Deployment
-Parsnip is packaged via Docker Compose for easy deployment.
+Start the stack:
 
 ```bash
-# Build locally for development
 docker compose up -d --build
-
-# Or use pre-built GHCR images for production
-IMAGE_TAG=0.1.0 docker compose up -d --no-build
 ```
 
-**Access Points:**
-- **OpenWebUI:** `http://localhost:3000`
-- **Agent API Docs:** `http://localhost:8000/docs`
+Open:
 
-For advanced deployments (Kubernetes, GCP Cloud Run, AWS), refer to [DEPLOYMENT.md](docs/DEPLOYMENT.md) and [CLOUD_STORAGE_PLAN.md](docs/CLOUD_STORAGE_PLAN.md).
+- OpenWebUI: `http://localhost:3000`
+- Agent API docs: `http://localhost:8000/docs`
+- Pipeline API: `http://localhost:9099`
 
----
+## Operations
 
-## 🛡️ Security, Privacy & Enterprise Readiness
+Useful checks:
 
-Parsnip is designed to be **air-gappable**. By leveraging local Ollama instances for embeddings and LLM generation, no sensitive document data ever leaves your network. 
+```bash
+./pi-ctl.sh status
+curl -sS http://localhost:8000/health
+curl -sS http://localhost:8000/stats
+curl -sS http://localhost:3000/api/config
+```
 
-**Guardrails in Place:**
-- **Aggressive Cost Control:** Built-in tool budgets, loop prevention, and context pruning ensure that runaway agent tasks are terminated before consuming excessive compute.
-- **Sandboxed Execution:** The Analysis server runs in a strictly isolated container to prevent malicious code execution from affecting the host or database.
-- **Persistent Disaster Recovery:** Automated, chron-triggered Parquet backups of the knowledge base and tarballs of the configuration to local disk or GCS.
+Common workflows:
 
----
+- Start or stop Wikipedia ingestion with `./pi-ctl.sh wiki start` and `./pi-ctl.sh wiki stop`.
+- Run a knowledge base report with `python scripts/kb_report.py`.
+- Back up KB data with `python scripts/backup_kb.py`.
+- Back up project configuration with `python scripts/backup_config.py`.
 
-## 📚 Documentation Directory
+## Security Notes
 
-- **Architecture & Visuals:** [ARCHITECTURE.md](ARCHITECTURE.md) | [ARCHITECTURE_VISUALS.md](docs/ARCHITECTURE_VISUALS.md) | [CLOUD_STORAGE_PLAN.md](docs/CLOUD_STORAGE_PLAN.md)
-- **Configuration & Setup:** [CONFIGURATION.md](docs/CONFIGURATION.md) | [DEPLOYMENT.md](docs/DEPLOYMENT.md)
-- **Extensibility:** [EXTENDING.md](docs/EXTENDING.md) | [HYBRID_RAG_SHOWCASE.md](docs/HYBRID_RAG_SHOWCASE.md)
-- **Future Roadmap:** [ROADMAP.md](docs/ROADMAP.md) | [future-dev.md](docs/future-dev-daryn.md)
+- Keep `.env`, service credentials, API keys, database dumps, and generated backups out of git.
+- Do not mount object storage directly as a live PostgreSQL or Joplin database volume. Use local block storage for databases and object storage for backups.
+- Treat generated analysis outputs as user data. Review before sharing or publishing.
+- Rotate secrets if they appear in logs, shell history, commits, or exported artifacts.
+
+## Documentation
+
+- [Architecture overview](ARCHITECTURE.md)
+- [Architecture diagrams](docs/ARCHITECTURE_VISUALS.md)
+- [Configuration](docs/CONFIGURATION.md)
+- [Deployment](docs/DEPLOYMENT.md)
+- [Storage and backup guidance](docs/CLOUD_STORAGE_PLAN.md)
+- [Extension guide](docs/EXTENDING.md)
+- [Hybrid RAG showcase](docs/HYBRID_RAG_SHOWCASE.md)
+- [Branding assets](docs/branding/README.md)
 
 ## License
+
 Apache License 2.0. See [LICENSE](LICENSE).

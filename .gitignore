@@ -39,3 +39,15 @@ scripts/.kb_report_note_id
 .vscode/
 *.swp
 *.swo
+
+# Local planning and agent-generated notes
+.codex
+.codex/
+.planning/
+docs/ROADMAP.md
+docs/*ROADMAP*.md
+docs/*roadmap*.md
+docs/future-*.md
+docs/*PLAN*.md
+docs/*plan*.md
+*.agent.md
