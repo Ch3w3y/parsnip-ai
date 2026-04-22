@@ -15,12 +15,12 @@ logger = logging.getLogger(__name__)
 # Future: auto-sync from OpenRouter API on startup.
 MODEL_ALIASES = {
     # Single model per tier — cascading fallback goes DOWN tiers, not across chains.
-    # All agentic routing goes through OpenRouter; GPU is reserved for embeddings ONLY.
+    # Entire stack is now Ollama (Local GPU for Fast/Smart, Cloud for Reasoning).
     "fast": [
-        "google/gemma-4-26b-a4b-it:free",
+        "gemma4:e4b",
     ],
     "smart": [
-        "nvidia/nemotron-3-super-120b-a12b:free",
+        "qwen3.5:4b",
     ],
     "reasoning": [
         "kimi-k2.6:cloud",
@@ -29,7 +29,7 @@ MODEL_ALIASES = {
         "kimi-k2.6:cloud",
     ],
     "classifier": [
-        "qwen/qwen2.5-3b-instruct",
+        "qwen2.5:3b",
     ],
 }
 

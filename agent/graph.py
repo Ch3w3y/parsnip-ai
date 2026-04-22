@@ -566,33 +566,6 @@ def _get_llm(model: str | None = None, streaming: bool = True) -> ChatOpenAI:
     settings = get_settings()
     selected = settings.resolve_model(model or settings.default_llm)
 
-    # Route to GPU Ollama instance if the model matches a GPU model
-    if settings.gpu_llm_enabled and selected == settings.gpu_llm_model:
-        return ChatOpenAI(
-            model=selected,
-            base_url=f"{settings.gpu_llm_url}/v1",
-            api_key="not-needed",
-            streaming=streaming,
-        )
-    if settings.gpu_mid_enabled and selected == settings.gpu_mid_model:
-        return ChatOpenAI(
-            model=selected,
-            base_url=f"{settings.gpu_llm_url}/v1",
-            api_key="not-needed",
-            streaming=streaming,
-        )
-
-    if settings.openai_compat_enabled:
-        compat_base = settings.openai_compat_base_url.rstrip("/")
-        if not compat_base.endswith("/v1"):
-            compat_base = f"{compat_base}/v1"
-        return ChatOpenAI(
-            model=selected,
-            base_url=compat_base,
-            api_key=settings.openai_compat_api_key,
-            streaming=streaming,
-        )
-
     # Route to Ollama Cloud if model ID ends in :cloud
     if selected.endswith(":cloud") and settings.ollama_api_key:
         cloud_base = settings.ollama_cloud_url.rstrip("/")
@@ -602,6 +575,15 @@ def _get_llm(model: str | None = None, streaming: bool = True) -> ChatOpenAI:
             model=selected,
             base_url=cloud_base,
             api_key=settings.ollama_api_key,
+            streaming=streaming,
+        )
+
+    # All other non-cloud models route to local GPU Ollama if enabled
+    if settings.gpu_llm_enabled:
+        return ChatOpenAI(
+            model=selected,
+            base_url=f"{settings.gpu_llm_url}/v1",
+            api_key="ollama",
             streaming=streaming,
         )
 
