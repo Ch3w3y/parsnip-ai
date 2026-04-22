@@ -75,7 +75,7 @@ OLLAMA_CLOUD_URL=https://ollama.com/v1
 EMBED_MODEL=mxbai-embed-large
 
 # Local GPU Routing (Optional)
-GPU_LLM_URL=http://100.78.71.116:11434
+GPU_LLM_URL=http://your-local-gpu-ip:11434
 GPU_LLM_MODEL=gemma4:e4b
 
 # UI Security

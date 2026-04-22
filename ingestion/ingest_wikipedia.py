@@ -9,7 +9,7 @@ Usage:
     # 2. Run ingestion (embeddings via remote Ollama + mxbai-embed-large):
     #    cd ingestion
     #    export DATABASE_URL=postgresql://agent:PASSWORD@localhost:5432/agent_kb
-    #    export OLLAMA_BASE_URL=http://100.78.71.116:11434
+    #    export OLLAMA_BASE_URL=http://your-local-gpu-ip:11434
     #    export EMBED_MODEL=mxbai-embed-large
     #    uv run python ingest_wikipedia.py --wiki-dir ./data/wiki_extracted
 
