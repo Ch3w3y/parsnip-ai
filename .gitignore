@@ -48,7 +48,9 @@ scripts/test_news.py
 # Local planning and agent-generated notes
 .codex
 .codex/
+.claude/
 .planning/
+.handover.md
 docs/ROADMAP.md
 docs/*ROADMAP*.md
 docs/*roadmap*.md
