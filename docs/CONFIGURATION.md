@@ -11,6 +11,13 @@ All runtime behavior is configured via `.env`.
 
 ## LLM Backend Modes
 
+### Ollama (Hybrid Local/Cloud)
+
+The preferred stack for low cost and high reasoning:
+- **Local GPU:** `GPU_LLM_URL` and `GPU_LLM_MODEL`.
+- **Ollama Cloud:** `OLLAMA_API_KEY` and `OLLAMA_CLOUD_URL`.
+- Set `MODEL_ALIASES` in `agent/config.py` to route tiers (e.g. `kimi-k2.6:cloud`).
+
 ### OpenRouter
 
 Set:

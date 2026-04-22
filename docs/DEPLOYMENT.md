@@ -57,10 +57,56 @@ Supported practical patterns:
 - VM + Neon-like serverless Postgres.
 - VM + object storage + CI-driven updates.
 
-## Operational Baselines
+## Critical Operational Notes
+
+### PostgreSQL Data Persistence
+
+**CRITICAL:** The `timescale/timescaledb-ha:pg16` image uses `PGDATA=/home/postgres/pgdata/data`,
+**not** `/var/lib/postgresql/data`. The `docker-compose.yml` is configured correctly, but if you
+modify volume mounts manually, getting this wrong causes **total data loss on every container
+recreation**.
+
+Verify the mount is correct:
+```bash
+docker inspect pi_agent_postgres --format '{{json .Mounts}}'
+# Should show: parsnip_pgdata → /home/postgres/pgdata/data
+```
+
+### Backups
+
+The scheduler runs KB backups **4x daily** (00:00, 06:00, 12:00, 18:00 UTC) to GCS:
+- `gs://<bucket>/backups/latest/knowledge_chunks.parquet`
+- Embeddings are included in the backup (since v0.1.0+)
+
+Run a manual backup:
+```bash
+cd scripts
+python backup_kb.py
+```
+
+### Recovery
+
+If data is lost, restore from the latest GCS backup:
+```bash
+gcloud storage cp gs://<bucket>/backups/latest/knowledge_chunks.parquet /tmp/
+# Then use the restore script or load directly with pandas → psycopg
+```
+
+### Joplin Server Admin
+
+Joplin Server reads `JOPLIN_SERVER_ADMIN_EMAIL` **only on first startup** when the DB is empty.
+If you recreate the postgres container, Joplin may create the admin with the default email
+(`admin@localhost`) instead of your `.env` value. Run the fix script:
+
+```bash
+./scripts/fix-joplin-admin.sh
+```
+
+### Operational Baselines
 
 - Keep `.env` out of git; inject via secure secret channel.
 - Enforce regular backup + restore drills.
 - Pin image tags for reproducible upgrades (e.g. `IMAGE_TAG=0.1.0`).
 - Pull from GHCR in production instead of building on the host.
 - Run secret scan before every release.
+- Monitor `parsnip_pgdata` volume size — alerts if growth stalls or drops unexpectedly.

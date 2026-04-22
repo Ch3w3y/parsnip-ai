@@ -58,11 +58,58 @@ It is built for teams that want full control over models, data, and deployment.
 
 ## Why It’s Different
 
-- Fully open source and self-hostable.
-- Grounded generation via explicit ingestion and traceable sources.
-- Agentic memory + retrieval in one cohesive stack.
-- Pluggable data onboarding: APIs, notes, markdown, PDFs, and domain-specific connectors.
-- Configurable model routing through `.env` (OpenRouter, OpenAI-compatible endpoints, local/remote Ollama embeddings).
+- **Fully Open Source & Self-Hostable:** Every component, including the underlying LLMs, can be run on-premise.
+- **Truly Local Reasoning:** Optimized for **Moonshot AI / Kimi-k2.6** (available via Ollama), providing state-of-the-art analytical reasoning and coding capabilities in a fully private stack.
+- **Grounded Generation:** Traceable sources via explicit ingestion.
+- **Agentic Memory + Retrieval:** Long-term persistence and session-aware context.
+- **Hybrid RAG:** Synthesizes live web search with curated knowledge base grounding.
+- **Configurable Model Routing:** Dynamic complexity-based routing to local GPU models or remote providers via OpenRouter.
+
+## Hybrid RAG: Web + KB Synthesis
+
+Unlike traditional RAG that only retrieves from a static corpus, `parsnip-ai` performs **live web search** and **knowledge base grounding** in the same request, then synthesizes cross-source reports with explicit provenance.
+
+### Example: Space Exploration Report
+
+**Prompt:** "Search the web for latest space news (2025-2026), then search the KB for Apollo/NASA history. Synthesize a grounded report."
+
+**Output excerpt:**
+
+> **Historical Context:** The Space Race was ignited by the Soviet Union's launch of *Sputnik 1* in 1957, leading to NASA's creation in 1958 **[Source: Apollo 11 KB]**.
+>
+> **Current Developments:** Artemis 1 tested uncrewed SLS/Orion; crewed missions face spacesuit/HLS delays **[Source: Web Search]**. In February 2026, SpaceX integrated xAI to accelerate AI-driven rocketry **[Source: SpaceX Updates]**.
+>
+> **Synthesis:** Apollo proved lunar travel was possible; Artemis now aims to make it sustainable, using public-private partnerships to establish long-term lunar presence **[Source: NASA News]**.
+
+### Architecture
+
+```
+User Prompt
+    |
+    v
+[Web Search]  --->  Real-time articles, news, papers (2025-2026)
+    |                    |
+    |                    v
+[KB Search]   --->  Wikipedia grounding, historical context
+    |                    |
+    v                    v
+[Synthesis Node]  --->  Markdown report with [Source: X] tags
+    |
+    v
+[Joplin Export]  --->  Persistent note + joplin:// deep-link
+```
+
+### Try It Yourself
+
+```bash
+# Run the curated demo scenarios
+python scripts/run_demo.py
+
+# Or run a single scenario
+python scripts/run_demo.py --scenario space_exploration
+```
+
+See [docs/HYBRID_RAG.md](docs/HYBRID_RAG.md) for the full capabilities showcase.
 
 ## Joplin Notebook Sync Pipeline
 
@@ -72,6 +119,14 @@ Parsnip includes an end-user friendly integration path:
 - retrieve those notes in grounded responses and analysis workflows.
 
 This gives non-technical users a practical notebook frontend while keeping ingestion and retrieval architecture consistent with the rest of the platform.
+
+## Hybrid Ollama Stack
+
+Parsnip is optimized for a unified Ollama technology stack, enabling massive, high-complexity research without per-token costs:
+
+- **Local GPU:** Low and mid-complexity tasks (e.g., `gemma4:e4b`, `qwen3.5:4b`) are routed to your local Ollama instance.
+- **Ollama Cloud:** High-complexity reasoning tasks use a fixed-rate subscription for models like **Kimi-k2.6:cloud**.
+- **Automated Routing:** The agent intelligently switches between local and cloud endpoints based on the task tier, ensuring both speed and depth while maintaining fiscal responsibility.
 
 ## Core Capabilities
 

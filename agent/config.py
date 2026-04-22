@@ -14,37 +14,22 @@ logger = logging.getLogger(__name__)
 # To update: run GET /models on the agent, find the new provider ID, and update here.
 # Future: auto-sync from OpenRouter API on startup.
 MODEL_ALIASES = {
+    # Single model per tier — cascading fallback goes DOWN tiers, not across chains.
+    # All agentic routing goes through OpenRouter; GPU is reserved for embeddings ONLY.
     "fast": [
-        "google/gemini-2.0-flash-001",
-        "google/gemini-2.0-flash-lite-001",
-        "qwen/qwen-turbo",
+        "nvidia/llama-3.3-nemotron-super-49b-v1.5",
     ],
     "smart": [
-        "google/gemini-2.0-flash-001",
-        "qwen/qwen3.6-plus",
-        "qwen/qwen3-235b-a22b-2507",
-        "deepseek/deepseek-chat-v3.2",
-        "google/gemini-2.5-flash",
+        "nvidia/nemotron-3-super-120b-a12b:free",
     ],
     "reasoning": [
-        "google/gemini-3-flash-preview",
-        "google/gemini-2.5-pro",
-        "qwen/qwen3.6-plus",
-        "qwen/qwen3-235b-a22b-2507",
-        "deepseek/deepseek-chat-v3.2",
+        "moonshotai/kimi-k2-6",
     ],
     "graph": [
-        "google/gemini-3-flash-preview",
-        "google/gemini-2.5-pro",
-        "qwen/qwen3.6-plus",
-        "qwen/qwen3-235b-a22b-2507",
-        "deepseek/deepseek-chat-v3.2",
+        "moonshotai/kimi-k2-6",
     ],
     "classifier": [
-        "meta-llama/llama-3.1-8b-instruct",
-        "google/gemma-3-4b-it:free",
-        "google/gemma-4-26b-a4b-it:free",
-        "meta-llama/llama-3.2-3b-instruct",
+        "qwen/qwen2.5-3b-instruct",
     ],
 }
 
@@ -60,6 +45,8 @@ class Settings(BaseSettings):
     database_url: str
     openrouter_api_key: str
     ollama_base_url: str = "http://host.docker.internal:11434"
+    ollama_api_key: str = ""  # For Ollama Cloud
+    ollama_cloud_url: str = "https://ollama.com/v1"
     embed_model: str = "mxbai-embed-large"
 
     # LLM routing — use alias names (fast/smart/reasoning) or raw provider IDs

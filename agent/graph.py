@@ -13,6 +13,8 @@ Checkpointer: AsyncPostgresSaver — survives container restarts.
 import os
 import json
 import logging
+import threading
+import time
 import httpx
 from typing import Annotated
 
@@ -113,6 +115,19 @@ Technical operating principles:
 - Prefer direct answers for simple questions. Use tools when freshness, private
   knowledge, files, code execution, or source evidence would materially improve
   the answer.
+- HARD RULE — Knowledge Base First: whenever the user asks for research,
+  analysis, summaries, visualizations, word clouds, trend reports, thematic
+  exploration, or any investigation of "what we know about X", you MUST query
+  the knowledge base BEFORE producing the deliverable. This applies even when
+  the user does NOT explicitly mention "knowledge base", "existing data", or
+  "stored documents". Your default assumption is: if the request involves
+  themes, topics, categories, patterns, or corpus-level insights, the primary
+  source is the local knowledge base (5.9 M+ chunks, 725 k+ Wikipedia articles).
+  Call `kb_search`, `research`, `adaptive_search`, or `holistic_search` as the
+  FIRST step, feed ONLY the returned real text into downstream analysis, and
+  cite the actual sources. If the KB returns no results, report that honestly.
+  NEVER synthesize, hallucinate, or use your parametric knowledge as a
+  substitute for real KB data when the user expects an evidence-based answer.
 - For broad or uncertain research, start with `adaptive_search` or
   `holistic_search`. Use `kb_search`, `search_with_filters`, `timeline`,
   `get_document`, `compare_sources`, and `find_similar` when they fit the shape
@@ -149,6 +164,13 @@ Safety and execution boundaries:
 - If code execution fails, use the error output to fix the next attempt. Avoid
   repeating identical tool calls or rewrites without a new hypothesis.
 - Cite source titles and links for research claims when tools provide them.
+
+Joplin execution rule:
+- When the user explicitly asks you to save, store, or create a note in Joplin,
+  you MUST call the appropriate Joplin tool (`joplin_create_note`,
+  `joplin_update_note`, etc.) as a real tool call. A text-only response claiming
+  the note was saved is NOT sufficient. After creating the note, return the
+  note title and a `joplin://` deep-link in your final answer.
 """
 
 TOOLS = [
@@ -360,67 +382,230 @@ async def _load_l1_memory(thread_id: str, db_url: str) -> str:
     return "\n".join(lines)
 
 
+# ── Circuit breaker for OpenRouter rate-limit / quota exhaustion ───────────
+# When OpenRouter returns 403 (key limit), 429 (rate limit), or 402 (payment),
+# we rotate to the next model in the alias fallback chain.
+# NOTE: GPU Ollama is reserved for embeddings ONLY — not used for agentic tasks.
+
+_OPENROUTER_TRIPPED = False
+_OPENROUTER_TRIPPED_AT: float | None = None
+_OPENROUTER_LOCK = threading.Lock()
+_OPENROUTER_COOLDOWN_SECONDS = 300  # 5 minutes
+
+
+def _trip_circuit():
+    global _OPENROUTER_TRIPPED, _OPENROUTER_TRIPPED_AT
+    with _OPENROUTER_LOCK:
+        _OPENROUTER_TRIPPED = True
+        _OPENROUTER_TRIPPED_AT = time.time()
+    logger.warning("OpenRouter circuit breaker TRIPPED — rotating to fallback model")
+
+
+def _reset_circuit():
+    global _OPENROUTER_TRIPPED, _OPENROUTER_TRIPPED_AT
+    with _OPENROUTER_LOCK:
+        _OPENROUTER_TRIPPED = False
+        _OPENROUTER_TRIPPED_AT = None
+    logger.info("OpenRouter circuit breaker RESET")
+
+
+def _circuit_is_open() -> bool:
+    """Check if circuit is tripped and cooldown has not expired."""
+    global _OPENROUTER_TRIPPED, _OPENROUTER_TRIPPED_AT
+    with _OPENROUTER_LOCK:
+        if not _OPENROUTER_TRIPPED:
+            return False
+        if _OPENROUTER_TRIPPED_AT is None:
+            return False
+        elapsed = time.time() - _OPENROUTER_TRIPPED_AT
+        if elapsed >= _OPENROUTER_COOLDOWN_SECONDS:
+            # Auto-reset after cooldown
+            _OPENROUTER_TRIPPED = False
+            _OPENROUTER_TRIPPED_AT = None
+            logger.info("OpenRouter circuit breaker auto-RESET after cooldown")
+            return False
+        return True
+
+
+def _is_rate_limit_error(e: Exception) -> bool:
+    """Detect OpenRouter rate-limit / quota errors from langchain/openai exceptions."""
+    msg = str(e).lower()
+    codes = ["403", "429", "402", "key limit exceeded", "rate limit", "quota",
+             "insufficient_quota", "payment_required", "limit exceeded"]
+    return any(c in msg for c in codes)
+
+
+def _get_cascading_fallbacks(current_model: str, current_tier: str) -> list[str]:
+    """Build a cascading fallback list: same-tier → mid-tier → low/free-tier (GPU).
+
+    Each tier has exactly one model. GPU low-tier is the final safety net.
+    """
+    from config import MODEL_ALIASES, TIER_ALIASES
+
+    fallbacks: list[str] = []
+
+    # 1. If high tier, add mid-tier model
+    if current_tier == "high":
+        mid_alias = TIER_ALIASES.get("mid", "smart")
+        mid_chain = MODEL_ALIASES.get(mid_alias, [])
+        if mid_chain and mid_chain[0] != current_model:
+            fallbacks.append(mid_chain[0])
+
+    # 2. Add low/free-tier model (OpenRouter)
+    low_alias = TIER_ALIASES.get("low", "fast")
+    low_chain = MODEL_ALIASES.get(low_alias, [])
+    if low_chain and low_chain[0] != current_model and low_chain[0] not in fallbacks:
+        fallbacks.append(low_chain[0])
+
+    return fallbacks
+
+
+def _try_gpu_fallback(messages, tools, streaming):
+    """Final fallback to GPU Ollama for low-tier tasks."""
+    from config import get_settings
+    settings = get_settings()
+    if not settings.gpu_llm_enabled or not settings.gpu_llm_model:
+        return None
+    logger.info(f"Trying GPU fallback: {settings.gpu_llm_model}")
+    fallback_llm = ChatOpenAI(
+        model=settings.gpu_llm_model,
+        base_url=f"{settings.gpu_llm_url}/v1",
+        api_key="not-needed",
+        streaming=streaming,
+    )
+    if tools:
+        fallback_llm = fallback_llm.bind_tools(tools)
+    try:
+        return fallback_llm.invoke(messages)
+    except Exception as e:
+        logger.warning(f"GPU fallback failed: {e}")
+        return None
+
+
+def _invoke_with_fallback(llm, messages, tools: list | None = None, tier: str = "mid"):
+    """Invoke LLM; on failure/rate-limit, cascade down model tiers using the hybrid router.
+
+    Order: same-tier → mid-tier → low/free-tier (Local GPU/Cloud).
+    """
+    settings = get_settings()
+    current_model = getattr(llm, "model_name", "")
+    fallback_chain = _get_cascading_fallbacks(current_model, tier)
+    streaming = getattr(llm, "streaming", True)
+
+    # If circuit is open, jump straight to fallbacks (skip primary model entirely)
+    if _circuit_is_open():
+        logger.warning("Primary model circuit is OPEN. Skipping to fallbacks.")
+        for fallback_id in fallback_chain:
+            logger.info(f"Circuit open — trying fallback model {fallback_id}")
+            fallback_llm = _get_llm(model=fallback_id, streaming=streaming)
+            if tools:
+                fallback_llm = fallback_llm.bind_tools(tools)
+            try:
+                return fallback_llm.invoke(messages)
+            except Exception as e2:
+                logger.warning(f"Fallback {fallback_id} failed: {e2}")
+                continue
+        
+        # Final safety net: GPU Ollama
+        gpu_result = _try_gpu_fallback(messages, tools, streaming)
+        if gpu_result is not None:
+            return gpu_result
+            
+        raise RuntimeError(
+            "Model circuit is open and all fallback options (including GPU) failed. "
+            "Please check your Ollama Cloud subscription or local GPU status."
+        )
+
+    try:
+        return llm.invoke(messages)
+    except Exception as e:
+        if _is_rate_limit_error(e):
+            _trip_circuit()
+            logger.warning(f"Primary model blocked ({e}). Cascading through fallback chain ...")
+            for fallback_id in fallback_chain:
+                logger.info(f"Retrying with fallback model {fallback_id}")
+                fallback_llm = _get_llm(model=fallback_id, streaming=streaming)
+                if tools:
+                    fallback_llm = fallback_llm.bind_tools(tools)
+                try:
+                    result = fallback_llm.invoke(messages)
+                    logger.info(f"Fallback succeeded with {fallback_id}")
+                    return result
+                except Exception as e2:
+                    logger.warning(f"Fallback {fallback_id} failed: {e2}")
+                    continue
+            
+            # Final safety net: GPU Ollama
+            gpu_result = _try_gpu_fallback(messages, tools, streaming)
+            if gpu_result is not None:
+                return gpu_result
+            logger.error("All fallback models exhausted; GPU fallback also failed")
+        raise
+
+
 def _get_llm(model: str | None = None, streaming: bool = True) -> ChatOpenAI:
     from config import get_settings
 
     settings = get_settings()
     selected = settings.resolve_model(model or settings.default_llm)
 
-    # Route to GPU Ollama instance if the model matches a GPU model
-    if settings.gpu_llm_enabled and selected == settings.gpu_llm_model:
+    # Route to Ollama Cloud if model ID ends in :cloud
+    if selected.endswith(":cloud") and settings.ollama_api_key:
+        cloud_base = settings.ollama_cloud_url.rstrip("/")
+        if not cloud_base.endswith("/v1"):
+            cloud_base = f"{cloud_base}/v1"
         return ChatOpenAI(
             model=selected,
-            base_url=f"{settings.gpu_llm_url}/v1",
-            api_key="not-needed",
-            streaming=streaming,
-        )
-    if settings.gpu_mid_enabled and selected == settings.gpu_mid_model:
-        return ChatOpenAI(
-            model=selected,
-            base_url=f"{settings.gpu_llm_url}/v1",
-            api_key="not-needed",
+            base_url=cloud_base,
+            api_key=settings.ollama_api_key,
             streaming=streaming,
         )
 
-    if settings.openai_compat_enabled:
-        compat_base = settings.openai_compat_base_url.rstrip("/")
-        if not compat_base.endswith("/v1"):
-            compat_base = f"{compat_base}/v1"
+    # All other non-cloud models route to local GPU Ollama if enabled
+    if settings.gpu_llm_enabled:
         return ChatOpenAI(
             model=selected,
-            base_url=compat_base,
-            api_key=settings.openai_compat_api_key,
+            base_url=f"{settings.gpu_llm_url}/v1",
+            api_key="ollama",
             streaming=streaming,
         )
 
-    return ChatOpenAI(
-        model=selected,
-        base_url="https://openrouter.ai/api/v1",
-        api_key=os.environ["OPENROUTER_API_KEY"],
-        streaming=streaming,
-        default_headers={
-            "HTTP-Referer": "https://github.com/pi-agent",
-            "X-Title": "pi-agent",
-        },
+    # If GPU is disabled, fall back to OpenRouter ONLY if a key exists
+    openrouter_key = os.environ.get("OPENROUTER_API_KEY")
+    if openrouter_key:
+        return ChatOpenAI(
+            model=selected,
+            base_url="https://openrouter.ai/api/v1",
+            api_key=openrouter_key,
+            streaming=streaming,
+            default_headers={
+                "HTTP-Referer": "https://github.com/pi-agent",
+                "X-Title": "pi-agent",
+            },
+        )
+
+    raise RuntimeError(
+        f"No LLM backend available for model '{selected}'. "
+        "Please enable GPU_LLM or provide OLLAMA_API_KEY/OPENROUTER_API_KEY."
     )
 
 
 TOOL_CALL_BUDGETS = {
-    "low": 10,
-    "mid": 20,
-    "high": 35,
+    "low": 5,
+    "mid": 12,
+    "high": 25,
 }
-SAME_TOOL_REPEAT_LIMIT = 5  # repeated same tool with identical args
+SAME_TOOL_REPEAT_LIMIT = 2  # repeated same tool with identical args
 SAME_TOOL_REPEAT_LIMITS = {
     # Analysis tools often need iterative refinement/fixing across a few runs.
-    "execute_r_script": 10,
-    "execute_python_script": 10,
-    "execute_workspace_script": 10,
-    "write_and_execute_script": 10,
-    "web_search": 7,
-    "kb_search": 7,
-    "holistic_search": 7,
-    "adaptive_search": 7,
+    "execute_r_script": 5,
+    "execute_python_script": 5,
+    "execute_workspace_script": 5,
+    "write_and_execute_script": 5,
+    "web_search": 3,
+    "kb_search": 3,
+    "holistic_search": 3,
+    "adaptive_search": 3,
 }
 
 ANALYSIS_TOOL_NAMES = {
@@ -434,6 +619,7 @@ ANALYSIS_TOOL_NAMES = {
 
 
 def _latest_user_text(messages: list[BaseMessage]) -> str:
+    """Extract text from the most recent human message."""
     for msg in reversed(messages):
         if isinstance(msg, HumanMessage):
             return str(msg.content or "")
@@ -685,6 +871,62 @@ def _response_calls_analysis_tool(response: BaseMessage) -> bool:
     return False
 
 
+def _prune_messages(messages: list[BaseMessage], max_tool_chars: int = 12000) -> list[BaseMessage]:
+    """Prune long tool outputs and history to keep context manageable (~10-15k tokens)."""
+    pruned = []
+    if not messages:
+        return []
+
+    # Always keep system prompt if first
+    start_idx = 0
+    if isinstance(messages[0], SystemMessage):
+        pruned.append(messages[0])
+        start_idx = 1
+
+    # Keep the rest, but truncate giant tool messages
+    for msg in messages[start_idx:]:
+        if isinstance(msg, ToolMessage) and len(str(msg.content)) > max_tool_chars:
+            new_content = str(msg.content)[:max_tool_chars] + "\n\n[... output truncated to save context ...]"
+            msg = ToolMessage(
+                content=new_content,
+                tool_call_id=msg.tool_call_id,
+                status=getattr(msg, "status", "success"),
+            )
+        pruned.append(msg)
+
+    # If history is getting very long, drop middle messages but keep context
+    # (Keep System + First User Msg + Last 20 messages, aligned to tool boundaries)
+    if len(pruned) > 25:
+        # Find first human message to keep head
+        first_user_idx = -1
+        for i, m in enumerate(pruned):
+            if isinstance(m, HumanMessage):
+                first_user_idx = i
+                break
+        
+        # Keep head: system + first user
+        head = pruned[:first_user_idx + 1] if first_user_idx != -1 else pruned[:1]
+        
+        # Take tail and align: must start with an AIMessage or HumanMessage, 
+        # NOT a ToolMessage or a paired AIMessage with tool_calls.
+        tail_size = 20
+        tail_start_idx = len(pruned) - tail_size
+        
+        # Walk backward to find a clean break point (HumanMessage or non-tool AIMessage)
+        while tail_start_idx < len(pruned) - 1:
+            m = pruned[tail_start_idx]
+            if isinstance(m, HumanMessage):
+                break
+            if isinstance(m, AIMessage) and not m.tool_calls:
+                break
+            tail_start_idx += 1
+            
+        tail = pruned[tail_start_idx:]
+        pruned = head + [HumanMessage(content="[... older history omitted to save context ...]")] + tail
+
+    return pruned
+
+
 def make_agent_node(db_url: str):
     def agent_node(state: AgentState):
         llm = _get_llm(state.get("model_override"))
@@ -708,6 +950,9 @@ def make_agent_node(db_url: str):
         prompt = BASE_PROMPT
         if memory_ctx:
             prompt = prompt + "\n\n" + memory_ctx
+
+        # ── Message Pruning ───────────────────────────────────────────────────
+        state["messages"] = _prune_messages(state["messages"])
 
         # ── Write-loop tracker (file write deduplication) ─────────────────────
         write_tracker = state.get("_write_tracker") or {
@@ -824,7 +1069,7 @@ def make_agent_node(db_url: str):
                     )
                 )
             ]
-            response = llm_with_tools.invoke(messages)
+            response = _invoke_with_fallback(llm_with_tools, messages, tools=selected_tools, tier=tier)
             # Strip any tool calls from the response to force termination
             if hasattr(response, "tool_calls") and response.tool_calls:
                 response = AIMessage(content=response.content or "I've gathered sufficient information. Based on my research: " + str(response.content))
@@ -848,7 +1093,7 @@ def make_agent_node(db_url: str):
         messages = [SystemMessage(prompt)] + state["messages"]
         if guardrail_notice:
             messages.append(HumanMessage(content=guardrail_notice))
-        response = llm_with_tools.invoke(messages)
+        response = _invoke_with_fallback(llm_with_tools, messages, tools=selected_tools, tier=tier)
 
         # Enforce real execution for analysis requests: no "text-only" completion
         # if no analysis execution tool has been called yet.
@@ -857,7 +1102,8 @@ def make_agent_node(db_url: str):
             if _response_calls_analysis_tool(response):
                 return {"messages": [response], "_write_tracker": write_tracker, "_tool_call_tracker": tool_tracker}
 
-            forced = llm_with_tools.invoke(
+            forced = _invoke_with_fallback(
+                llm_with_tools,
                 messages
                 + [
                     HumanMessage(
@@ -868,7 +1114,9 @@ def make_agent_node(db_url: str):
                             "Do not call search tools or provide a narrative-only answer."
                         )
                     )
-                ]
+                ],
+                tools=selected_tools,
+                tier=tier,
             )
             if _response_calls_analysis_tool(forced):
                 response = forced
@@ -931,7 +1179,7 @@ Examples:
         if not user_msg:
             return None
 
-        classifier_model = os.environ.get("CLASSIFIER_MODEL", "qwen2.5:3b")
+        classifier_model = os.environ.get("CLASSIFIER_MODEL", settings.gpu_llm_model or "qwen2.5:3b")
 
         try:
             payload = {

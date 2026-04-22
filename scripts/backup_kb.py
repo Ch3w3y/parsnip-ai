@@ -37,11 +37,10 @@ DB_URL = os.environ.get("DATABASE_URL", "postgresql://agent:[REDACTED]@localhost
 def export_table_to_parquet(conn, table: str, columns: list[str], output_path: Path, partition_col: str | None = None):
     """Export a PostgreSQL table to Parquet via pandas."""
     import pandas as pd
+    import numpy as np
 
     col_str = ", ".join(columns)
     query = f"SELECT {col_str} FROM {table}"
-    if table == "knowledge_chunks":
-        query += " WHERE embedding IS NOT NULL"
 
     logger.info(f"Exporting {table}...")
     df = pd.read_sql(query, conn)
@@ -66,6 +65,24 @@ def export_table_to_parquet(conn, table: str, columns: list[str], output_path: P
             if sample.apply(lambda x: isinstance(x, (dict, list))).any():
                 df[col] = df[col].apply(lambda x: _json.dumps(x) if x is not None else None)
 
+    # Convert pgvector embedding to float arrays
+    # read_sql can return embeddings as lists, numpy arrays, or strings depending on registration.
+    if "embedding" in df.columns:
+        def _to_float_list(x):
+            if x is None:
+                return None
+            if isinstance(x, str):
+                # Parse string "[0.1, 0.2, ...]"
+                try:
+                    return [float(v) for v in x.strip("[]").split(",") if v.strip()]
+                except Exception:
+                    return None
+            if isinstance(x, (list, np.ndarray)):
+                return [float(v) for v in x]
+            return list(x)
+            
+        df["embedding"] = df["embedding"].apply(_to_float_list)
+
     df.to_parquet(output_path, engine="pyarrow", compression="snappy", index=False)
     size_mb = output_path.stat().st_size / (1024 * 1024)
     logger.info(f"  Written to {output_path} ({size_mb:.1f} MB)")
@@ -74,8 +91,10 @@ def export_table_to_parquet(conn, table: str, columns: list[str], output_path: P
 def backup_to_local(output_dir: Path) -> dict:
     """Backup both tables to local Parquet files."""
     import pandas as pd
+    from pgvector.psycopg import register_vector
 
     conn = psycopg.connect(DB_URL)
+    register_vector(conn)
     try:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         backup_dir = output_dir / today
@@ -89,7 +108,7 @@ def backup_to_local(output_dir: Path) -> dict:
             conn,
             "knowledge_chunks",
             ["id", "source", "source_id", "chunk_index", "content", "metadata",
-             "embedding_model", "user_id", "created_at", "updated_at"],
+             "embedding", "embedding_model", "user_id", "created_at", "updated_at"],
             kb_path,
         )
 
