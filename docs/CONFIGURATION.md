@@ -16,7 +16,8 @@ All runtime behavior is configured via `.env`.
 The preferred stack for low cost and high reasoning:
 - **Local GPU:** `GPU_LLM_URL` and `GPU_LLM_MODEL`.
 - **Ollama Cloud:** `OLLAMA_API_KEY` and `OLLAMA_CLOUD_URL`.
-- Set `MODEL_ALIASES` in `agent/config.py` to route tiers (e.g. `kimi-k2.6:cloud`).
+- Configure alias targets in `.env`: `FAST_MODEL`, `SMART_MODEL`,
+  `REASONING_MODEL`, `GRAPH_MODEL`, and `CLASSIFIER_MODEL`.
 
 ### OpenRouter
 
@@ -25,6 +26,9 @@ Set:
 - `OPENROUTER_API_KEY`
 - `DEFAULT_LLM`
 - `RESEARCH_LLM`
+- `FAST_MODEL`
+- `SMART_MODEL`
+- `REASONING_MODEL`
 
 ### OpenAI-Compatible Endpoint
 
@@ -34,8 +38,30 @@ Set:
 - `OPENAI_COMPAT_API_KEY`
 - `DEFAULT_LLM`
 - `RESEARCH_LLM`
+- `FAST_MODEL`
+- `SMART_MODEL`
+- `REASONING_MODEL`
 
 `OPENAI_COMPAT_BASE_URL` may be local or remote. `/v1` is appended automatically when missing.
+
+## Model Aliases
+
+`DEFAULT_LLM` and `RESEARCH_LLM` can point at stable aliases such as `smart`
+and `reasoning`. The concrete model IDs for those aliases come from `.env`.
+
+```ini
+FAST_MODEL=llama3.1:cloud
+SMART_MODEL=kimi-k2.6:cloud
+REASONING_MODEL=kimi-k2.6:cloud
+GRAPH_MODEL=kimi-k2.6:cloud
+CLASSIFIER_MODEL=qwen2.5:3b
+```
+
+Each alias variable may contain a comma-separated fallback chain, for example:
+
+```ini
+SMART_MODEL=kimi-k2.6:cloud,llama3.1:cloud
+```
 
 ## Embeddings
 

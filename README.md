@@ -67,7 +67,7 @@ For detailed diagrams, see [docs/ARCHITECTURE_VISUALS.md](docs/ARCHITECTURE_VISU
 
 ## Model Routing
 
-Model selection is configured in [agent/config.py](agent/config.py). The agent accepts stable aliases such as `fast`, `smart`, `reasoning`, and `classifier`, then resolves them to provider-specific model IDs.
+Model selection is configured in `.env`. The agent accepts stable aliases such as `fast`, `smart`, `reasoning`, and `classifier`, then resolves them to provider-specific model IDs through env-backed alias variables such as `FAST_MODEL`, `SMART_MODEL`, and `REASONING_MODEL`.
 
 Supported routing patterns:
 
