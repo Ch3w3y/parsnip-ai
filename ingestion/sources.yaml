@@ -1,0 +1,126 @@
+# Ingestion source registry — declarative plugin definitions for parsnip.
+#
+# Each source specifies:
+#   module:       Python module name (ingest_*.py in ingestion/)
+#   schedule:     Cron expression (null = manual only)
+#   conflict:     "skip" (DO NOTHING) or "update" (DO UPDATE)
+#   pipeline:     Chunking/embedding configuration
+#   enabled:      true/false — disabled sources are ignored by the scheduler
+#
+# Only 7 sources have scheduled runs (matching scheduler/scheduler.py).
+# Others are enabled but manual-only (schedule: null).
+
+sources:
+  arxiv:
+    module: ingest_arxiv
+    schedule: "0 3 * * 1"       # Mon 03:00 UTC
+    conflict: skip               # DO NOTHING — papers are immutable
+    pipeline:
+      embedding: {provider: ollama, model: mxbai-embed-large}
+    enabled: true
+
+  biorxiv:
+    module: ingest_biorxiv
+    schedule: "0 3 * * 2"       # Tue 03:00 UTC
+    conflict: skip               # DO NOTHING — preprints are immutable
+    pipeline:
+      embedding: {provider: ollama, model: mxbai-embed-large}
+    enabled: true
+
+  news_api:
+    module: ingest_news_api
+    schedule: "0 6 * * *"        # Daily 06:00 UTC
+    conflict: skip               # DO NOTHING — articles are immutable
+    pipeline:
+      embedding: {provider: ollama, model: mxbai-embed-large}
+    enabled: true
+
+  forex:
+    module: ingest_forex
+    schedule: "0 7 * * *"        # Daily 07:00 UTC
+    conflict: update              # DO UPDATE — rates change
+    pipeline:
+      embedding: {provider: ollama, model: mxbai-embed-large}
+    enabled: true
+
+  worldbank:
+    module: ingest_worldbank
+    schedule: "0 4 * * 0"        # Sun 04:00 UTC
+    conflict: update              # DO UPDATE — indicators change
+    pipeline:
+      embedding: {provider: ollama, model: mxbai-embed-large}
+    enabled: true
+
+  wikipedia_updates:
+    module: ingest_wikipedia_updates
+    schedule: "0 2 * * 0"        # Sun 02:00 UTC (gated until seed completion)
+    conflict: update              # DO UPDATE — articles change
+    pipeline:
+      embedding: {provider: ollama, model: mxbai-embed-large}
+    enabled: true
+
+  joplin:
+    module: ingest_joplin
+    schedule: "0 */6 * * *"      # Every 6h safety fallback
+    conflict: update              # DO UPDATE — notes change
+    pipeline:
+      embedding: {provider: ollama, model: mxbai-embed-large}
+    enabled: true
+
+  # --- Manual-only sources (no scheduled runs) ---
+
+  wikipedia:
+    module: ingest_wikipedia
+    schedule: null               # One-time seed, not scheduled
+    conflict: update             # DO UPDATE — articles change
+    pipeline:
+      embedding: {provider: ollama, model: mxbai-embed-large}
+    enabled: true
+
+  github:
+    module: ingest_github
+    schedule: null               # Manual only
+    conflict: update             # DO UPDATE — repos change
+    pipeline:
+      embedding: {provider: ollama, model: bge-m3}
+    enabled: true
+
+  news:
+    module: ingest_news
+    schedule: null               # Manual only (RSS fallback)
+    conflict: skip               # DO NOTHING — articles are immutable
+    pipeline:
+      embedding: {provider: ollama, model: mxbai-embed-large}
+    enabled: true
+
+  hackernews:
+    module: ingest_hackernews
+    schedule: null               # Manual only
+    conflict: update             # DO UPDATE — stories change
+    pipeline:
+      embedding: {provider: ollama, model: mxbai-embed-large}
+    enabled: true
+
+  pubmed:
+    module: ingest_pubmed
+    schedule: null               # Manual only
+    conflict: skip               # DO NOTHING — papers are immutable
+    pipeline:
+      embedding: {provider: ollama, model: mxbai-embed-large}
+    enabled: true
+
+  rss:
+    module: ingest_rss
+    schedule: null               # Manual only
+    conflict: update             # DO UPDATE — feed items can change
+    pipeline:
+      embedding: {provider: ollama, model: mxbai-embed-large}
+    enabled: true
+
+  ssrn:
+    module: ingest_ssrn
+    schedule: null               # Manual only
+    conflict: update             # DO UPDATE — papers can be revised
+    pipeline:
+      embedding: {provider: ollama, model: mxbai-embed-large}
+    enabled: true
