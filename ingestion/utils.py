@@ -289,3 +289,50 @@ async def finish_job(conn, job_id: int, status: str = "done"):
         "UPDATE ingestion_jobs SET status = %s, finished_at = NOW() WHERE id = %s",
         (status, job_id),
     )
+
+
+async def recover_stuck_jobs(conn, timeout_hours: float = None) -> int:
+    """Mark running ingestion jobs as failed if they have been running too long.
+
+    If *timeout_hours* is None, the value is read from the
+    ``INGESTION_JOB_TIMEOUT_HOURS`` environment variable (default: 2).
+
+    Returns the number of jobs that were recovered.
+    """
+    if timeout_hours is None:
+        timeout_hours = float(os.environ.get("INGESTION_JOB_TIMEOUT_HOURS", "2"))
+
+    # First, get the stuck jobs so we can log them
+    stuck_rows = await (
+        await conn.execute(
+            f"""
+            SELECT id, source, started_at
+            FROM ingestion_jobs
+            WHERE status = 'running'
+              AND started_at < NOW() - INTERVAL '{timeout_hours} hours'
+            """
+        )
+    ).fetchall()
+
+    if not stuck_rows:
+        return 0
+
+    # Mark them as failed
+    result = await conn.execute(
+        f"""
+        UPDATE ingestion_jobs
+        SET status = 'failed', finished_at = NOW()
+        WHERE status = 'running'
+          AND started_at < NOW() - INTERVAL '{timeout_hours} hours'
+        """
+    )
+
+    for row in stuck_rows:
+        job_id, source, started_at = row
+        duration = datetime.now(timezone.utc) - started_at.replace(tzinfo=timezone.utc) if started_at else None
+        duration_str = str(duration) if duration else "unknown"
+        logger.warning(
+            f"Recovered stuck job: id={job_id} source={source} duration={duration_str}"
+        )
+
+    return result.rowcount

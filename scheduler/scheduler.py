@@ -5,6 +5,9 @@ Schedule:
   - News:               daily  at 06:00 UTC
   - arXiv:              weekly on Monday at 03:00 UTC
   - Wikipedia updates:  weekly on Sunday at 02:00 UTC
+
+All ingestion sources are resolved via the SourceRegistry plugin system
+(instead of direct module imports). See registry_adapter.run_source().
 """
 
 import asyncio
@@ -12,23 +15,15 @@ import logging
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent / "ingestion"))
-
-import psycopg
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).parent / "ingestion" / ".." / ".env")
+from ingestion.registry import SourceRegistry
+from ingestion.utils import get_db_connection, recover_stuck_jobs
+from registry_adapter import run_source
 
-import ingest_news_api
-import ingest_arxiv
-import ingest_biorxiv
-import ingest_joplin
-import ingest_wikipedia_updates
-import ingest_forex
-import ingest_worldbank
-from utils import get_db_connection
+load_dotenv(Path(__file__).parent / "ingestion" / ".." / ".env")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,6 +31,9 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("scheduler")
+
+# --- Plugin registry (replaces direct sys.path hack + import of each ingest_*.py) ---
+registry = SourceRegistry()
 
 ARXIV_CATEGORIES = [
     "cs.AI",
@@ -87,7 +85,7 @@ async def wikipedia_seed_running() -> bool:
 async def run_news():
     logger.info("=== Starting daily news ingestion ===")
     try:
-        await ingest_news_api.main_async(days=1, from_raw=None)
+        await run_source(registry, "news_api", days=1, from_raw=None)
     except Exception as e:
         logger.error(f"News ingestion failed: {e}", exc_info=True)
 
@@ -95,24 +93,25 @@ async def run_news():
 async def run_arxiv():
     logger.info("=== Starting weekly arXiv ingestion ===")
     try:
-        await ingest_arxiv.main_async(
-            categories=ARXIV_CATEGORIES,
-            max_per_cat=500,
-        )
+        await run_source(registry, "arxiv", categories=ARXIV_CATEGORIES, max_per_cat=500)
     except Exception as e:
         logger.error(f"arXiv ingestion failed: {e}", exc_info=True)
 
 
 async def run_biorxiv():
+    """bioRxiv/medRxiv — two separate calls with different server params."""
     logger.info("=== Starting weekly bioRxiv/medRxiv ingestion ===")
+    entry = registry.get_source("biorxiv")
+    func = entry.get_entry_point()
     try:
-        await ingest_biorxiv.main_async(
+        import ingest_biorxiv as _biorxiv_mod  # needed for DEFAULT_CATEGORIES
+        await func(
             server="biorxiv",
             days=7,
-            categories=ingest_biorxiv.DEFAULT_CATEGORIES,
+            categories=_biorxiv_mod.DEFAULT_CATEGORIES,
             limit=None,
         )
-        await ingest_biorxiv.main_async(
+        await func(
             server="medrxiv",
             days=7,
             categories=[],  # medRxiv uses different category names — fetch all, filter later
@@ -125,7 +124,7 @@ async def run_biorxiv():
 async def run_joplin():
     logger.info("=== Starting Joplin incremental sync ===")
     try:
-        await ingest_joplin.main_async(full=False)
+        await run_source(registry, "joplin", full=False)
     except SystemExit:
         logger.warning("Joplin sync skipped — Joplin not running or token not set.")
     except Exception as e:
@@ -135,7 +134,7 @@ async def run_joplin():
 async def run_forex():
     logger.info("=== Starting daily forex ingestion ===")
     try:
-        await ingest_forex.main_async(days=30)
+        await run_source(registry, "forex", days=30)
     except Exception as e:
         logger.error(f"Forex ingestion failed: {e}", exc_info=True)
 
@@ -143,7 +142,7 @@ async def run_forex():
 async def run_world_bank():
     logger.info("=== Starting monthly World Bank ingestion ===")
     try:
-        await ingest_worldbank.main_async(years=20, all_countries=True)
+        await run_source(registry, "worldbank", years=20, all_countries=True)
     except Exception as e:
         logger.error(f"World Bank ingestion failed: {e}", exc_info=True)
 
@@ -171,7 +170,7 @@ async def run_wikipedia_updates():
     async with _wikipedia_lock:
         logger.info("=== Starting weekly Wikipedia incremental update ===")
         try:
-            await ingest_wikipedia_updates.main_async(days=7, limit=None)
+            await run_source(registry, "wikipedia_updates", days=7, limit=None)
         except Exception as e:
             logger.error(f"Wikipedia update failed: {e}", exc_info=True)
 
@@ -230,6 +229,18 @@ async def main():
     logger.info("Running initial backups…")
     await run_config_backup()
     await run_backup()
+
+    # Recover stuck jobs before starting the scheduler
+    try:
+        conn = await get_db_connection()
+        recovered = await recover_stuck_jobs(conn)
+        if recovered > 0:
+            logger.warning(f"Recovered {recovered} stuck ingestion job(s) on startup")
+        else:
+            logger.info("No stuck ingestion jobs found on startup")
+        await conn.close()
+    except Exception as e:
+        logger.warning(f"Could not recover stuck jobs on startup: {e}")
 
     scheduler.add_job(run_news, CronTrigger(hour=6, minute=0), id="news")
     scheduler.add_job(run_arxiv, CronTrigger(day_of_week="mon", hour=3), id="arxiv")
