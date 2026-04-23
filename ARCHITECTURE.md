@@ -1,16 +1,15 @@
 # Architecture
 
-Parsnip is a local-first research and knowledge platform built around OpenWebUI,
-a FastAPI/LangGraph agent runtime, PostgreSQL with pgvector, scheduled ingestion,
-and optional analysis/Joplin integrations.
+Parsnip is a local-first research and knowledge platform built around an
+assistant-ui Next.js frontend, a FastAPI/LangGraph agent runtime, PostgreSQL
+with pgvector, scheduled ingestion, and optional analysis/Joplin integrations.
 
 ## High-Level Topology
 
 ```mermaid
 flowchart TD
-    User((User)) -->|Browser| OWUI[OpenWebUI<br/>:3000]
-    OWUI -->|OpenAI-compatible stream| Pipe[Pipelines adapter<br/>:9099]
-    Pipe -->|Chat and tool requests| Agent[Agent API<br/>:8000]
+    User((User)) -->|Browser| FE[assistant-ui<br/>Next.js :3000]
+    FE -->|/v1/chat/completions| Agent[Agent API<br/>:8000]
 
     subgraph Runtime[Agent runtime]
         Agent --> Graph[LangGraph orchestration]
@@ -29,9 +28,12 @@ flowchart TD
     subgraph Integrations[Tool targets]
         Tools --> Search[SearXNG / external search]
         Tools --> Analysis[Analysis server<br/>:8095]
-        Tools --> Joplin[Joplin MCP<br/>:8090]
+        Tools --> JoplinPG[Joplin PG direct<br/>joplin_pg.py]
         Tools --> GitHub[GitHub tools]
     end
+
+    JoplinPG -.->|deprecated| JMCP[Joplin MCP<br/>:8090]
+    JoplinPG --> PG
 
     Memory --> AM
     Checkpoints --> PG
@@ -43,17 +45,20 @@ flowchart TD
     AM --> PG
 ```
 
-OpenWebUI owns the browser experience. The Agent API owns orchestration,
-retrieval, memory, tool execution, and model selection.
+assistant-ui (Next.js) owns the browser experience. The Agent API owns
+orchestration, retrieval, memory, tool execution, and model selection.
+Joplin integration uses direct PostgreSQL access (joplin_pg.py) — the legacy
+MCP HTTP bridge is deprecated (shown as dashed line above).
 
 ## Main Services
 
 - `agent`: FastAPI service for retrieval, synthesis, memory, and tool workflows.
-- `pipelines`: OpenWebUI-compatible adapter that forwards chat traffic to the agent.
+- `frontend`: assistant-ui Next.js app providing the chat UI, pointed at `/v1/chat/completions`.
+- `pipelines`: OpenWebUI-compatible adapter that forwards chat traffic to the agent (legacy, retained for backward compatibility).
 - `analysis`: optional execution service for Python/R workloads and generated artifacts.
-- `scheduler`: recurring ingestion, Joplin sync safety jobs, and backup jobs.
+- `scheduler`: recurring ingestion, Joplin sync safety jobs, and backup jobs. Auto-recovers stuck jobs on startup.
 - `postgres`: primary store for vectors, memories, checkpoints, structured data, and Joplin's database.
-- `joplin` / `joplin-mcp`: optional note server and integration bridge.
+- `joplin` / `joplin-mcp`: optional note server and integration bridge (MCP bridge deprecated; agent uses `joplin_pg.py` instead).
 - `searxng`: local metasearch endpoint used when configured.
 
 ## Data Model Highlights
@@ -109,6 +114,81 @@ external provider unless that provider is configured in `.env`.
 - Context pruning for oversized tool output and long message histories.
 - LangGraph recursion caps to prevent runaway loops.
 - Required model aliases validated at startup.
+
+## Plugin Registry Architecture
+
+Ingestion sources are managed declaratively via `ingestion/sources.yaml` and the
+`SourceRegistry` class (`ingestion/registry.py`). The registry:
+
+1. Reads explicit source definitions from `sources.yaml` (module, schedule, conflict strategy, embedding config).
+2. Auto-discovers `ingest_*.py` files in the ingestion directory that are not declared in YAML.
+3. Validates each module has a `main_async()` (preferred) or `main()` entry point.
+4. Provides `list_sources(enabled_only=True)` and `get_source(name)` for the scheduler.
+
+The scheduler consumes `SourceRegistry` via `scheduler/registry_adapter.py`, which
+bridges scheduled jobs to the registry's source definitions. Adding a new source
+only requires creating the script and adding an entry to `sources.yaml`.
+
+## Connection Pool Architecture
+
+The agent uses a named connection pool registry (`agent/tools/db_pool.py`) backed
+by `psycopg_pool.AsyncConnectionPool`:
+
+- **`agent_kb`**: primary pool for knowledge base, memory, and checkpoint access.
+- **`joplin`**: dedicated pool for Joplin PostgreSQL database (direct PG access, no HTTP/MCP).
+
+Pools are initialised at app startup (`lifespan` in `main.py`) and closed on shutdown.
+Any tool can retrieve a pool by name:
+
+```python
+from tools.db_pool import get_pool
+pool = get_pool("agent_kb")
+async with pool.connection() as conn:
+    await conn.execute("SELECT 1")
+```
+
+## Circuit Breaker
+
+The agent implements a file-based circuit breaker for OpenRouter rate-limit and
+quota errors (`agent/graph_guardrails.py`):
+
+- **State file**: `/tmp/parsnip_circuit_breaker.json` (configurable via `PARSNIP_CIRCUIT_BREAKER_PATH`).
+- **Trip conditions**: OpenRouter returns 403, 429, or 402.
+- **Behaviour on trip**: rotate to the next model in the alias fallback chain (same tier → mid tier → low tier).
+- **Cooldown**: 300 seconds (5 min). After cooldown, the circuit auto-resets.
+- **Process safety**: writes use temp-file + `os.rename` for atomicity; reads use `fcntl.flock` for concurrent access.
+
+## Stuck Job Recovery
+
+The scheduler auto-recovers stuck ingestion jobs on startup:
+
+1. On startup, `recover_stuck_jobs()` queries `ingestion_jobs` for rows with `status='running'` that have exceeded the timeout (default: 2× the schedule interval or 24h minimum).
+2. Each stuck job is reset to `status='pending'` so it will be picked up on the next scheduler cycle.
+3. The recovery count is logged at startup.
+
+## Unified Joplin Access Pattern
+
+Joplin integration now uses **direct PostgreSQL access** (`agent/tools/joplin_pg.py`)
+instead of the HTTP → MCP bridge. This eliminates a network hop and the MCP server
+dependency. All Joplin tools (create_notebook, search_notes, create_note, etc.) operate
+via the `joplin` named connection pool. The MCP server (`joplin-mcp :8090`) remains
+available for backward compatibility but is no longer used by the agent.
+
+## Frontend
+
+The browser experience uses **assistant-ui** (Next.js + React), replacing OpenWebUI.
+The frontend connects to the agent API via the OpenAI-compatible
+`/v1/chat/completions` endpoint. Custom tool UI components are built with
+`makeAssistantToolUI` from the assistant-ui React library. OpenWebUI and its
+pipelines adapter remain in `docker-compose.yml` for parallel operation during
+the transition.
+
+## Pipeline (research_agent)
+
+The research agent tool still proxies web search results, but Joplin note
+enrichment has been removed from the pipeline. Joplin content is now accessed
+only through the explicit `joplin_search` tool and the `holistic_search`
+"Your Notes" layer.
 
 ## Deployment Posture
 

@@ -143,12 +143,32 @@ The Joplin watcher (`scheduler/joplin_watcher.py`) polls Joplin Server every 30s
 
 ## Adding a New Source
 
-1. Create `ingest_<source>.py` — use `embed_batch` and `bulk_upsert_chunks` from `utils.py`.
-2. Set `source='<name>'` consistently (this is the `source` column in `knowledge_chunks`).
-3. **Follow the landing zone pattern:** separate `fetch_all_*()` from `process_*()`. Call `save_raw()` after fetching and add a `--from-raw` argument that calls `iter_raw()` instead of the API.
-4. Add it to `scheduler/scheduler.py` with an APScheduler trigger.
-5. Register the source in the routing system (see below).
-6. Document it in this file and any user-facing docs that describe the source.
+1. **Create the ingestion script** — `ingest_<source>.py` in `ingestion/`. The script must expose a `main_async()` entry point (or `main()` as fallback). Use `embed_batch` and `bulk_upsert_chunks` from `utils.py`.
+2. **Add an entry to `sources.yaml`** — define the source with its schedule, conflict strategy, pipeline config, and enabled flag. The scheduler will auto-discover and schedule it based on this entry.
+3. **Optionally add to `ROUTING_CONFIG`** — if the source should be searchable by the agent, add it to `intent_layers` and `layer_budgets` in `agent/tools/router.py`. If it uses a non-default embedding model, add it to `SOURCE_MODEL_MAP`.
+4. **Follow the landing zone pattern** — separate `fetch_all_*()` from `process_*()`. Call `save_raw()` after fetching and add a `--from-raw` argument that calls `iter_raw()` instead of the API.
+5. **Document it** — add a row to the Pipelines table above and update the source list in `agent/tools/kb_search.py` and `agent/tools/holistic_search.py` docstrings.
+
+### sources.yaml Schema Reference
+
+Each source entry in `sources.yaml` has these required fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `module` | string | Python module name (must match `ingest_*.py` in `ingestion/`) |
+| `schedule` | string or null | Cron expression for the scheduler, or `null` for manual-only |
+| `conflict` | `"skip"` or `"update"` | Upsert conflict strategy (see below) |
+| `pipeline.embedding` | object | `{provider: ollama, model: <embed_model>}` — which embedding model to use |
+| `enabled` | boolean | `false` = scheduler ignores this source entirely |
+
+**Conflict strategies:**
+
+| Strategy | SQL | When to use |
+|----------|-----|-------------|
+| `skip` | `ON CONFLICT DO NOTHING` | Source content is immutable after publish (papers, articles) |
+| `update` | `ON CONFLICT DO UPDATE` | Source content changes over time (notes, repos, indicators) |
+
+The `SourceRegistry` (`ingestion/registry.py`) reads these entries, auto-discovers any `ingest_*.py` files not in YAML, and validates that every declared module has a `main_async()` or `main()` entry point.
 
 ## Extending the Routing System
 
