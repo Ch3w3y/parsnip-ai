@@ -14,16 +14,19 @@
   <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white">
   <img alt="pgvector" src="https://img.shields.io/badge/pgvector-334155?logo=postgresql&logoColor=white">
   <img alt="LangGraph" src="https://img.shields.io/badge/LangGraph-111827?logo=langchain&logoColor=white">
-  <img alt="OpenWebUI" src="https://img.shields.io/badge/OpenWebUI-0F172A?logo=openai&logoColor=white">
+  <img alt="Next.js" src="https://img.shields.io/badge/Next.js-000000?logo=nextdotjs&logoColor=white">
+  <img alt="OpenWebUI" src="https://img.shields.io/badge/OpenWebUI%20(legacy)-334155?logo=openai&logoColor=white">
   <img alt="Ollama" src="https://img.shields.io/badge/Ollama-000000?logo=ollama&logoColor=white">
   <img alt="Joplin" src="https://img.shields.io/badge/Joplin-1071D3?logo=joplin&logoColor=white">
 </p>
 
 ## Overview
 
-`parsnip-ai` is a Docker Compose stack for running a private research assistant with persistent retrieval, long-term memory, scheduled ingestion, and a controlled Python/R analysis environment. It is designed for operators who want the convenience of a chat interface without giving up control of data storage, model routing, or analysis artifacts.
+`parsnip-ai` is a Docker Compose stack for running a private research assistant with persistent retrieval, long-term memory, scheduled ingestion, and a controlled Python/R analysis environment. The primary interface is a Next.js frontend (assistant-ui) backed by a LangGraph-based agent API. OpenWebUI and the pipeline adapter remain available for backward compatibility during the transition.
 
-The stack combines OpenWebUI, a pipeline adapter, a LangGraph-based agent API, PostgreSQL with pgvector/vectorscale, a Joplin Server integration, SearXNG, and a sandboxed analysis server. It can run fully local for private deployments, or route selected model calls to an OpenAI-compatible endpoint such as Ollama Cloud when higher-capacity reasoning is required.
+It is designed for operators who want the convenience of a chat interface without giving up control of data storage, model routing, or analysis artifacts. It can run fully local for private deployments, or route selected model calls to an OpenAI-compatible endpoint such as Ollama Cloud when higher-capacity reasoning is required.
+
+The stack combines PostgreSQL with pgvector/vectorscale for durable storage, a Joplin Server integration, SearXNG for metasearch, and a sandboxed analysis server.
 
 ## What It Provides
 
@@ -203,10 +206,16 @@ Operational helper scripts live in `scripts/`:
 
 ## Security Notes
 
-- Keep `.env`, service credentials, API keys, database dumps, and generated backups out of git.
-- Do not mount object storage directly as a live PostgreSQL or Joplin database volume. Use local block storage for databases and object storage for backups.
-- Treat generated analysis outputs as user data. Review before sharing or publishing.
-- Rotate secrets if they appear in logs, shell history, commits, or exported artifacts.
+- **Secrets:** Keep `.env`, service credentials, API keys, database dumps, and generated backups out of git. If a secret leaks in a commit, rotate it immediately and review any affected downstream systems.
+- **Docker:** Containers run as root by default except `postgres` and `searxng`. Prefer read-only mounts where possible and avoid running with `--privileged`.
+- **Network:** Only expose the frontend (`:3001`) and agent API (`:8000`) to external hosts. Internal services (PostgreSQL, Joplin Server, analysis server) should remain on the Docker bridge network.
+- **Database:** Do not mount object storage directly as a live PostgreSQL or Joplin database volume. Use local block storage for databases and object storage for backups only.
+- **Dependency updates:** Run `pip-audit` and `pip check` against `requirements.txt` files before deploying. Review Dependabot or Renovate alerts promptly.
+- **Data handling:** Treat generated analysis outputs as user data. Review before sharing or publishing. The self-hosted architecture means no telemetry is collected unless explicitly configured.
+- **Analysis sandbox:** The analysis container runs arbitrary user code. Do not place production credentials in its mounted directories.
+- **Review process:** Require at least one maintainer review, passing tests, and `docker compose config` validation before merging. See `CONTRIBUTING.md` for branch, commit, and PR conventions.
+
+For full security policy, supported versions, reporting procedures, and dependency scanning commands, see [`SECURITY.md`](SECURITY.md).
 
 ## Documentation
 
