@@ -1,0 +1,47 @@
+=== DEPLOYMENT.md Update Evidence ===
+Date: Thu Apr 23 2026
+Task: Task 9 — Update docs/DEPLOYMENT.md with frontend env vars, scheduler ops, deployment guidance
+
+---
+1. FRONTEND ENV VARS ADDED
+Location: docs/DEPLOYMENT.md, under "Local Docker Deployment (Baseline)" → "Frontend Environment Variables"
+- NEXT_PUBLIC_AGENT_URL: documented as public agent API URL reachable from the user's browser
+- AGENT_INTERNAL_URL: documented as internal agent API URL used by Next.js SSR inside Docker
+- Cross-referenced CONFIGURATION.md for full env var details
+
+---
+2. SCHEDULER OPERATIONS SECTION ADDED
+Location: docs/DEPLOYMENT.md, after "Frontend Environment Variables"
+- Documented pi-ctl.sh ingest start|stop|status commands
+- Added NEWS_API_KEY prerequisite for daily news ingestion
+- Added 3-step health check guidance:
+  a. ./pi-ctl.sh ingest status
+  b. curl -sS http://localhost:8000/ingestion/status
+  c. docker logs pi_agent_scheduler --tail 100
+- Added VRAM exhaustion warning about scheduler + Wikipedia bulk ingest conflict
+- Verified pi-ctl.sh commands exist in pi-ctl.sh lines 78-95
+
+---
+3. RESTORE SCRIPT REFERENCE FIXED
+Location: docs/DEPLOYMENT.md, "Recovery" subsection
+- Removed reference to non-existent "restore script"
+- Updated to: "Then load directly with pandas → psycopg"
+- Verified scripts/restore_kb.py does NOT exist (scripts/ contains restore_db.py but not restore_kb.py)
+
+---
+4. FILES NOT MODIFIED (per guardrails)
+- pi-ctl.sh: untouched
+- scripts/: no new scripts created
+- No Kubernetes or non-Docker deployment paths added
+- No other docs modified besides DEPLOYMENT.md
+
+---
+5. PREREQUISITE API KEYS IDENTIFIED
+From ingestion/ingest_news_api.py: NEWS_API_KEY is required for scheduled news ingestion.
+From ingestion/ingest_github.py: GITHUB_TOKEN is used but only for manual GitHub ingestion (not scheduled).
+Conclusion: NEWS_API_KEY is the only scheduled ingestion prerequisite explicitly documented.
+
+---
+6. CROSS-REFERENCES
+- Added CONFIGURATION.md cross-reference at top of DEPLOYMENT.md
+- Linked to CONFIGURATION.md#frontend in the frontend env vars subsection

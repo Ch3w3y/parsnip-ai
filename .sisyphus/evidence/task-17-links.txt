@@ -1,0 +1,39 @@
+# Internal Link Verification - task-17-links.txt
+# Generated: Thu Apr 23 2026
+# Result: ALL VALID (no 404s)
+
+## Verification Summary
+
+### Main Files Verified
+- README.md: All 12 internal links valid
+- ARCHITECTURE.md: No internal links found
+- CONTRIBUTING.md: No internal links found
+- SECURITY.md: No internal links found
+- agent/README.md: All 58 internal links valid (tools/*.py files, graph.py, graph_prompts.py)
+- ingestion/README.md: No markdown links
+
+### docs/ Directory Files Verified
+- docs/README.md: All 13 internal links valid (includes ../ARCHITECTURE.md relative links)
+- docs/ARCHITECTURE_VISUALS.md: No internal links found
+- docs/CONFIGURATION.md: All links valid (ROUTING.md)
+- docs/DEPLOYMENT.md: All links valid (CONFIGURATION.md x2)
+- docs/EXTENDING.md: All links valid (ROUTING.md)
+- docs/FRONTEND.md: All links valid (fragment links to headers in same file)
+- docs/HYBRID_RAG_SHOWCASE.md: All links valid (ROUTING.md x3)
+- docs/STORAGE_AND_BACKUP.md: No internal links found
+- docs/ROUTING.md: No internal links found
+- docs/API_REFERENCE.md: No internal links found
+- docs/TESTING.md: No internal links found
+- docs/TROUBLESHOOTING.md: All links valid (DEPLOYMENT.md x2, CONFIGURATION.md x2, STORAGE_AND_BACKUP.md)
+
+### docs/branding/ Directory
+- docs/branding/README.md: No internal links found
+
+## Broken Links Found: NONE
+
+All internal links (text paths) resolve to existing files.
+
+## Notes
+- Fragment links (#legacy-openwebui, #api-proxy, etc.) point to valid section headers in their target files
+- Relative paths like "../ARCHITECTURE.md" correctly resolve to parent directory
+- All .py file references in agent/README.md exist in tools/ subdirectory

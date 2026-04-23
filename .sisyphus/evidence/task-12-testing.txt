@@ -1,0 +1,768 @@
+============================= test session starts ==============================
+platform linux -- Python 3.14.4, pytest-9.0.3, pluggy-1.6.0 -- /home/daryn/parsnip/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /home/daryn/parsnip
+configfile: pyproject.toml
+testpaths: tests
+plugins: anyio-4.13.0, asyncio-1.3.0, langsmith-0.7.33
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 365 items
+
+<Dir parsnip>
+  <Dir tests>
+    <Package integration>
+      <Module test_joplin_api_integration.py>
+        Integration tests for Joplin PG layer + agent API endpoints.
+        
+        Verifies that:
+          - joplin_pg functions are proper LangChain @tool functions
+          - joplin_pg uses the named "joplin" pool from db_pool
+          - joplin_hitl functions are proper @tool functions
+          - joplin_hitl uses SHA-256 for content hashing
+          - FastAPI /v1/models returns OpenAI-compatible format
+          - /v1/chat/completions validates message input
+          - /v1/chat/completions extracts the last user message
+          - /v1/chat/completions streaming SSE matches OpenAI format
+        
+        No live PostgreSQL connection or running agent server is required.
+        DB calls are mocked; FastAPI endpoints are tested via TestClient.
+        <Class TestJoplinPgTools>
+          <Function test_joplin_pg_functions_are_langchain_tools>
+            All 12 joplin_pg functions have @tool decorator (check .name attribute).
+          <Function test_joplin_pg_tool_count_matches_decorator_count>
+            Verify the number of @tool-decorated functions exactly matches 12.
+        <Class TestJoplinPgNamedPool>
+          <Coroutine test_joplin_pg_uses_named_pool>
+            All joplin_pg tool functions call get_pool('joplin').
+          <Coroutine test_all_joplin_pg_tools_use_joplin_pool>
+            Every joplin_pg @tool function calls get_pool('joplin').
+        <Class TestJoplinHitlTools>
+          <Function test_joplin_hitl_functions_are_langchain_tools>
+            All 4 joplin_hitl functions have @tool decorator (check .name attribute).
+          <Function test_joplin_hitl_tool_count_matches_decorator_count>
+            Verify the number of @tool-decorated functions defined in joplin_hitl is exactly 4.
+        <Class TestJoplinHitlContentHashing>
+          <Function test_joplin_hitl_content_hashing>
+            sha256 is used for content hashing in joplin_hitl.py.
+          <Function test_content_hash_is_deterministic>
+            _content_hash returns the same value for the same input.
+          <Function test_content_hash_differs_for_different_content>
+            _content_hash returns different values for different inputs.
+          <Function test_content_hash_uses_sha256_algorithm>
+            Verify the _content_hash function explicitly uses SHA-256, not another hash.
+        <Class TestV1ModelsEndpoint>
+          <Function test_v1_models_endpoint_format>
+            GET /v1/models returns OpenAI-compatible format with object='list'.
+          <Function test_v1_models_model_has_required_fields>
+            Each model in /v1/models has id, object, owned_by fields.
+        <Class TestV1ChatCompletionsValidation>
+          <Function test_v1_chat_completions_rejects_empty_messages>
+            POST /v1/chat/completions with empty messages returns 400.
+          <Function test_v1_chat_completions_rejects_no_user_message>
+            POST /v1/chat/completions with only assistant messages returns 400.
+        <Class TestV1ChatCompletionsMessageExtraction>
+          <Function test_v1_chat_completions_extracts_last_user_message>
+            Verify the last user message in the messages array is used as the query.
+          <Function test_v1_chat_completions_includes_history_messages>
+            Prior messages in the array are included in the state as history.
+        <Class TestV1ChatCompletionsStreamFormat>
+          <Function test_v1_chat_completions_stream_format>
+            Mock the graph, verify SSE output matches OpenAI format.
+          <Function test_stream_ends_with_done_marker>
+            SSE stream ends with 'data: [DONE]'.
+          <Function test_final_chunk_has_stop_finish_reason>
+            The chunk before [DONE] has finish_reason: 'stop'.
+          <Function test_all_chunks_share_same_id>
+            All chunks in a stream share the same chatcmpl- ID.
+      <Module test_registry_integration.py>
+        Integration tests for ingestion.registry + scheduler.registry_adapter.
+        
+        Verifies that the SourceRegistry and the scheduler adapter work together
+        end-to-end — discovering modules, parsing YAML, resolving entry points,
+        and correctly routing sync vs. async execution.
+        
+        No live DB or external services are required.  All file reads use the
+        real project files; only module-level side-effects (importing ingestion
+        modules) are live since those modules already exist on disk.
+        <Class TestRegistryDiscoversModules>
+          <Function test_registry_discovers_all_ingest_modules>
+            SourceRegistry().__init__ discovers all 14 ingest_*.py files in ingestion/ dir.
+          <Function test_discovered_modules_match_ingest_py_files>
+            Every ingest_*.py file on disk should appear in the registry.
+        <Class TestSourcesYAMLMatchesDiscovered>
+          <Function test_sources_yaml_matches_discovered_modules>
+            Every module in sources.yaml exists as an ingest_*.py file.
+          <Function test_all_yaml_sources_are_in_registry>
+            All sources defined in sources.yaml are resolvable via the registry.
+        <Class TestSchedulerAdapterResolvesScheduled>
+          <Function test_scheduler_adapter_resolves_scheduled_sources>
+            All 7 scheduled sources resolve via the registry.
+          <Function test_scheduled_sources_have_schedules>
+            All scheduled sources have non-null schedule values in YAML.
+        <Class TestSyncEntryPointDetection>
+          <Function test_scheduler_adapter_detects_sync_entry_point>
+            ingest_wikipedia has main() not main_async() — get_entry_point resolves it.
+          <Function test_wikipedia_entry_point_is_not_coroutine>
+            ingest_wikipedia's resolved entry point is NOT a coroutine function.
+        <Class TestAsyncEntryPointDetection>
+          <Function test_scheduler_adapter_detects_async_entry_point>
+            ingest_arxiv has main_async() — get_entry_point resolves it.
+          <Function test_arxiv_entry_point_is_coroutine>
+            ingest_arxiv's resolved entry point IS a coroutine function.
+        <Class TestDisabledSourcesFiltered>
+          <Function test_disabled_sources_filtered>
+            Sources with enabled:false don't appear in list_sources(enabled_only=True).
+          <Function test_disabled_sources_appear_in_full_list>
+            Sources with enabled:false DO appear in list_sources(enabled_only=False).
+        <Class TestAutoDiscoveryYamlUndeclared>
+          <Function test_auto_discovery_finds_yaml_undeclared_sources>
+            Any .py file NOT in sources.yaml gets auto-discovered by the registry.
+          <Function test_yaml_entries_take_precedence>
+            YAML-defined source settings (e.g. schedule) take precedence over auto-discovery defaults.
+        <Class TestGetSourceRaisesForUnknown>
+          <Function test_get_source_raises_for_unknown>
+            Clear KeyError for nonexistent source name.
+          <Function test_get_source_error_message_is_descriptive>
+            The KeyError message should mention the source name.
+          <Coroutine test_run_source_raises_for_unknown>
+            run_source with unknown name raises KeyError through the registry.
+    <Module test_agent_guardrails.py>
+      Tests for agent guardrail policy helpers.
+      <Function test_model_aliases_resolve_from_environment>
+      <Function test_analysis_request_detection_requires_execution_intent>
+      <Function test_tool_args_signature_uses_matching_tool_call_id>
+      <Function test_tool_pack_selection_binds_relevant_general_tools>
+      <Function test_tool_pack_selection_keeps_analysis_and_github_broad>
+      <Coroutine test_preflight_feedback_is_recoverable_by_default>
+      <Coroutine test_preflight_feedback_hard_stops_when_user_requires_exact>
+    <Module test_analysis_server.py>
+      Tests for the analysis server endpoints.
+      <Class TestExecutePython>
+        <Function test_execute_python_success>
+        <Function test_execute_python_with_cache>
+      <Class TestExecuteR>
+        <Function test_execute_r_success>
+      <Class TestOutputs>
+        <Function test_list_outputs_empty>
+        <Function test_list_outputs_with_files>
+      <Class TestWorkspace>
+        <Function test_workspace_list>
+        <Function test_workspace_write_and_read>
+        <Function test_workspace_mkdir>
+        <Function test_workspace_delete>
+        <Function test_workspace_move>
+      <Class TestWorkspaceUserIsolation>
+        <Function test_workspace_isolated_by_user>
+      <Class TestCache>
+        <Function test_cache_stats_initial>
+        <Function test_cache_clear>
+      <Class TestSchedules>
+        <Function test_schedule_create>
+        <Function test_schedule_list>
+        <Function test_schedule_get>
+        <Function test_schedule_get_not_found>
+        <Function test_schedule_delete>
+        <Function test_schedule_run>
+    <Module test_circuit_breaker.py>
+      Tests for file-based process-safe circuit breaker.
+      
+      These tests verify that the circuit breaker state is safely shared across
+      processes via a JSON file with atomic writes and flock-based locking.
+      <Function test_circuit_is_closed_when_no_state_file>
+      <Function test_trip_circuit_writes_json_file>
+      <Function test_circuit_is_open_returns_true_when_tripped>
+      <Function test_circuit_auto_resets_after_cooldown>
+      <Function test_concurrent_writes_do_not_corrupt_file>
+      <Function test_stale_temp_files_cleaned_on_startup>
+      <Function test_reset_circuit_deletes_state_file>
+      <Function test_circuit_remains_open_within_cooldown>
+    <Module test_contracts.py>
+      Contract tests — validate HTTP interfaces between architectural arms.
+      
+      These tests require the services to be running (or mock them).
+      They are marked with `@pytest.mark.integration` so they can be skipped in pure unit runs.
+      
+      Run with services up:
+        pytest tests/test_contracts.py -v -m integration
+      
+      Run smoke only (no external deps):
+        pytest tests/test_contracts.py -v -m "not integration"
+      <Function test_agent_health>
+        Agent /health returns expected shape.
+      <Function test_agent_chat_sync_schema>
+        Agent /chat/sync returns the expected JSON schema.
+      <Function test_analysis_execute_python_smoke>
+        Analysis server can execute a trivial Python script.
+      <Function test_analysis_outputs_list>
+        Analysis server /outputs returns a list.
+      <Function test_joplin_mcp_ping>
+        Joplin MCP REST bridge responds to ping.
+      <Function test_pipeline_agent_chat_sync>
+        Pipeline can successfully POST to agent /chat/sync (no LLM required).
+      <Class TestStaticContracts>
+        Tests that don't require running services.
+        <Function test_agent_models_response_keys>
+          Verify the agent /models response shape is documented consistently.
+        <Function test_pipeline_valves_defaults>
+          Pipeline Valves must have sensible defaults for all fields.
+        <Function test_analysis_env_defaults>
+          Analysis server env vars have safe fallbacks.
+    <Module test_db_pool.py>
+      Tests for the named connection pool registry (tools.db_pool).
+      
+      Unit tests — no live PostgreSQL connection required.
+      psycopg_pool.AsyncConnectionPool is mocked so we can verify pool lifecycle,
+      registration, lookup, and error handling without a database.
+      <Coroutine test_init_pool_registers_pool>
+      <Coroutine test_init_pool_second_named_pool>
+      <Coroutine test_get_pool_returns_correct_pool>
+      <Function test_get_pool_unknown_raises_value_error>
+      <Coroutine test_pool_connection_acquisition>
+      <Coroutine test_pool_exhaustion>
+        When pool max_size=2, acquiring a 3rd connection raises PoolTimeout.
+      <Coroutine test_init_pool_invalid_dsn>
+        If pool.open() fails (e.g. bad DSN), the pool should not be registered.
+      <Coroutine test_close_all>
+      <Coroutine test_init_pool_passes_size_params>
+      <Coroutine test_init_pool_duplicate_name_overwrites>
+    <Module test_embed_routing.py>
+      Regression tests for embedding model routing.
+      
+      These tests lock in the fix that ensures GitHub sources use bge-m3 embeddings
+      while all other sources default to mxbai-embed-large. The routing logic spans
+      multiple modules (router, embed, kb_search, holistic_search), and these tests
+      ensure the correct model is selected at each decision point.
+      <Class TestSourceModelMap>
+        Validate the SOURCE_MODEL_MAP configuration in router.py.
+        <Function test_github_maps_to_bge_m3>
+          GitHub source must route to bge-m3 embeddings.
+        <Function test_default_model_is_mxbai>
+          DEFAULT_MODEL must be mxbai-embed-large.
+        <Function test_known_non_github_sources_default[wikipedia]>
+          All non-github sources must fall back to DEFAULT_MODEL via .get().
+        <Function test_known_non_github_sources_default[arxiv]>
+          All non-github sources must fall back to DEFAULT_MODEL via .get().
+        <Function test_known_non_github_sources_default[news]>
+          All non-github sources must fall back to DEFAULT_MODEL via .get().
+        <Function test_known_non_github_sources_default[biorxiv]>
+          All non-github sources must fall back to DEFAULT_MODEL via .get().
+        <Function test_known_non_github_sources_default[user_docs]>
+          All non-github sources must fall back to DEFAULT_MODEL via .get().
+        <Function test_known_non_github_sources_default[joplin_notes]>
+          All non-github sources must fall back to DEFAULT_MODEL via .get().
+        <Function test_unknown_source_defaults>
+          An unrecognised source must also fall back to DEFAULT_MODEL.
+      <Class TestGetEmbeddingPassthrough>
+        Validate that get_embedding() accepts and forwards the model parameter.
+        <Coroutine test_get_embedding_passes_model_param>
+          get_embedding must forward the explicit model= to Ollama.
+        <Coroutine test_get_embedding_defaults_to_env_model>
+          Without explicit model=, get_embedding should use EMBED_MODEL env var or mxbai default.
+      <Class TestKbSearchRouting>
+        Validate kb_search.py selects the correct embed model per source.
+        <Coroutine test_kb_search_uses_bge_for_github>
+          kb_search must call get_embedding with model='bge-m3' when source='github'.
+        <Coroutine test_kb_search_uses_mxbai_for_arxiv>
+          kb_search must call get_embedding with model='mxbai-embed-large' for non-github sources.
+      <Class TestHolisticSearchEmbedSelection>
+        Validate holistic_search.py selects the right embeddings per layer.
+        <Function test_github_layer_selects_bge_embs>
+          When a layer's first source is 'github', layer_model must be 'bge-m3'.
+        <Function test_github_layer_falls_back_to_mxbai_when_bge_unavailable>
+          When bge_embs is None (service down), github layer must fall back to mxbai.
+        <Function test_non_github_layers_use_mxbai[sources0]>
+          Non-github layers must always use mxbai embeddings.
+        <Function test_non_github_layers_use_mxbai[sources1]>
+          Non-github layers must always use mxbai embeddings.
+        <Function test_non_github_layers_use_mxbai[sources2]>
+          Non-github layers must always use mxbai embeddings.
+        <Function test_non_github_layers_use_mxbai[sources3]>
+          Non-github layers must always use mxbai embeddings.
+        <Function test_non_github_layers_use_mxbai[sources4]>
+          Non-github layers must always use mxbai embeddings.
+    <Module test_imports.py>
+      Import smoke tests — verify every tool module can be imported without the full stack running.
+      
+      These tests catch syntax errors, missing dependencies, and circular imports early.
+      Run with: pytest tests/test_imports.py -v
+      <Class TestSyntax>
+        Verify every .py file compiles to bytecode (catches syntax errors).
+        <Function test_compiles[agent/config.py]>
+        <Function test_compiles[agent/graph.py]>
+        <Function test_compiles[agent/graph_guardrails.py]>
+        <Function test_compiles[agent/graph_llm.py]>
+        <Function test_compiles[agent/graph_nodes.py]>
+        <Function test_compiles[agent/graph_prompts.py]>
+        <Function test_compiles[agent/graph_state.py]>
+        <Function test_compiles[agent/graph_tools.py]>
+        <Function test_compiles[agent/ingestion_status.py]>
+        <Function test_compiles[agent/main.py]>
+        <Function test_compiles[agent/tools/__init__.py]>
+        <Function test_compiles[agent/tools/adaptive_search.py]>
+        <Function test_compiles[agent/tools/analysis_server.py]>
+        <Function test_compiles[agent/tools/arxiv.py]>
+        <Function test_compiles[agent/tools/compare_sources.py]>
+        <Function test_compiles[agent/tools/db_pool.py]>
+        <Function test_compiles[agent/tools/embed.py]>
+        <Function test_compiles[agent/tools/filtered_search.py]>
+        <Function test_compiles[agent/tools/find_similar.py]>
+        <Function test_compiles[agent/tools/get_document.py]>
+        <Function test_compiles[agent/tools/github.py]>
+        <Function test_compiles[agent/tools/holistic_search.py]>
+        <Function test_compiles[agent/tools/ingest.py]>
+        <Function test_compiles[agent/tools/joplin_hitl.py]>
+        <Function test_compiles[agent/tools/joplin_mcp.py]>
+        <Function test_compiles[agent/tools/joplin_pg.py]>
+        <Function test_compiles[agent/tools/kb_search.py]>
+        <Function test_compiles[agent/tools/knowledge_gaps.py]>
+        <Function test_compiles[agent/tools/knowledge_graph.py]>
+        <Function test_compiles[agent/tools/llm_client.py]>
+        <Function test_compiles[agent/tools/memory.py]>
+        <Function test_compiles[agent/tools/notes.py]>
+        <Function test_compiles[agent/tools/pdf_ingest.py]>
+        <Function test_compiles[agent/tools/research.py]>
+        <Function test_compiles[agent/tools/router.py]>
+        <Function test_compiles[agent/tools/system.py]>
+        <Function test_compiles[agent/tools/timeline.py]>
+        <Function test_compiles[agent/tools/web.py]>
+        <Function test_compiles[agent/tools/workspace.py]>
+        <Function test_compiles[pipelines/research_agent.py]>
+        <Function test_compiles[analysis/server.py]>
+        <Function test_compiles[scheduler/joplin_watcher.py]>
+        <Function test_compiles[scheduler/registry_adapter.py]>
+        <Function test_compiles[scheduler/scheduler.py]>
+        <Function test_compiles[joplin-mcp/server.py]>
+      <Class TestAgentToolImports>
+        Verify agent tool modules import cleanly.
+        <Function test_tool_imports[__init__.py]>
+        <Function test_tool_imports[adaptive_search.py]>
+        <Function test_tool_imports[analysis_server.py]>
+        <Function test_tool_imports[arxiv.py]>
+        <Function test_tool_imports[compare_sources.py]>
+        <Function test_tool_imports[db_pool.py]>
+        <Function test_tool_imports[embed.py]>
+        <Function test_tool_imports[filtered_search.py]>
+        <Function test_tool_imports[find_similar.py]>
+        <Function test_tool_imports[get_document.py]>
+        <Function test_tool_imports[github.py]>
+        <Function test_tool_imports[holistic_search.py]>
+        <Function test_tool_imports[ingest.py]>
+        <Function test_tool_imports[joplin_hitl.py]>
+        <Function test_tool_imports[joplin_mcp.py]>
+        <Function test_tool_imports[joplin_pg.py]>
+        <Function test_tool_imports[kb_search.py]>
+        <Function test_tool_imports[knowledge_gaps.py]>
+        <Function test_tool_imports[knowledge_graph.py]>
+        <Function test_tool_imports[llm_client.py]>
+        <Function test_tool_imports[memory.py]>
+        <Function test_tool_imports[notes.py]>
+        <Function test_tool_imports[pdf_ingest.py]>
+        <Function test_tool_imports[research.py]>
+        <Function test_tool_imports[router.py]>
+        <Function test_tool_imports[system.py]>
+        <Function test_tool_imports[timeline.py]>
+        <Function test_tool_imports[web.py]>
+        <Function test_tool_imports[workspace.py]>
+        <Function test_tools_init_exports>
+          Every name in __all__ must exist and every tool file must be exported.
+      <Class TestPipelineImports>
+        <Function test_pipeline_imports>
+      <Class TestAnalysisImports>
+        <Function test_analysis_imports>
+      <Class TestSchedulerImports>
+        <Function test_scheduler_imports>
+      <Class TestJoplinMcpImports>
+        <Function test_joplin_mcp_imports>
+    <Module test_ingestion_utils.py>
+      Tests for ingestion utility functions.
+      <Class TestChunkText>
+        <Function test_chunk_text_basic>
+        <Function test_chunk_text_empty>
+        <Function test_chunk_text_single_word>
+        <Function test_chunk_text_overlap>
+      <Class TestEmbedBatch>
+        <Coroutine test_embed_batch_success>
+        <Coroutine test_embed_batch_empty>
+        <Coroutine test_embed_batch_whitespace_only>
+      <Class TestSaveRaw>
+        <Function test_save_raw_creates_file>
+        <Function test_save_raw_writes_records>
+      <Class TestIterRaw>
+        <Function test_iter_raw_reads_records>
+      <Class TestLatestRaw>
+        <Function test_latest_raw_returns_newest>
+        <Function test_latest_raw_none_when_no_files>
+      <Class TestUpsertChunks>
+        <Coroutine test_upsert_chunks>
+      <Class TestBulkUpsertChunks>
+        <Coroutine test_bulk_upsert_empty>
+        <Coroutine test_bulk_upsert_rows>
+    <Module test_joplin_hitl.py>
+      Tests for agent.tools.joplin_hitl — HITL (Human-in-the-Loop) workflow.
+      
+      Unit tests — mock the PG connection pool and joplin_pg tools to verify
+      the HITL workflow logic (generate → detect edits → review → publish).
+      <Coroutine test_generate_note_creates_session>
+      <Coroutine test_generate_note_stores_hash>
+      <Coroutine test_detect_edits_no_change>
+      <Coroutine test_detect_edits_detects_change>
+      <Coroutine test_review_edited_note_returns_diff>
+      <Coroutine test_publish_review_updates_content_and_hash>
+      <Coroutine test_detect_edits_no_session>
+      <Coroutine test_review_edited_note_no_session>
+    <Module test_joplin_pg.py>
+      Tests for agent.tools.joplin_pg — direct PG access layer.
+      
+      Unit tests — no live Joplin DB required.  We mock the connection pool
+      and verify that the correct SQL / params are emitted by each @tool
+      function.
+      <Coroutine test_create_note_returns_note_id_and_uri>
+      <Coroutine test_create_note_calls_pool>
+      <Coroutine test_create_note_with_tags>
+      <Coroutine test_get_note_returns_title_and_body>
+      <Coroutine test_get_note_not_found>
+      <Coroutine test_update_note_updates_content>
+      <Coroutine test_update_note_append>
+      <Coroutine test_delete_note_soft_deletes>
+      <Coroutine test_search_notes_found>
+      <Coroutine test_search_notes_empty>
+      <Coroutine test_create_notebook_returns_id>
+      <Coroutine test_list_notebooks_returns_folders>
+      <Coroutine test_ping_returns_ok>
+      <Coroutine test_edit_note_find_replace>
+      <Coroutine test_edit_note_append>
+      <Coroutine test_list_tags>
+      <Coroutine test_get_tags_for_note>
+      <Coroutine test_upload_resource>
+      <Function test_note_json_structure>
+      <Function test_folder_json_structure>
+      <Function test_parse_note_valid>
+      <Function test_parse_note_invalid>
+      <Function test_dsn_from_env>
+    <Module test_joplin_tools_unified.py>
+      Tests verifying Joplin tools resolve to joplin_pg (not joplin_mcp) in the unified PG layer.
+      
+      Validates:
+      - All 12 NOTE_TOOLS functions come from joplin_pg
+      - No httpx dependency in the joplin_pg tool path
+      - joplin_mcp emits a DeprecationWarning when imported
+      <Function test_note_tool_resolves_to_joplin_pg[joplin_create_notebook]>
+        Each Joplin tool in graph_tools.NOTE_TOOLS comes from joplin_pg, not joplin_mcp.
+      <Function test_note_tool_resolves_to_joplin_pg[joplin_create_note]>
+        Each Joplin tool in graph_tools.NOTE_TOOLS comes from joplin_pg, not joplin_mcp.
+      <Function test_note_tool_resolves_to_joplin_pg[joplin_update_note]>
+        Each Joplin tool in graph_tools.NOTE_TOOLS comes from joplin_pg, not joplin_mcp.
+      <Function test_note_tool_resolves_to_joplin_pg[joplin_edit_note]>
+        Each Joplin tool in graph_tools.NOTE_TOOLS comes from joplin_pg, not joplin_mcp.
+      <Function test_note_tool_resolves_to_joplin_pg[joplin_delete_note]>
+        Each Joplin tool in graph_tools.NOTE_TOOLS comes from joplin_pg, not joplin_mcp.
+      <Function test_note_tool_resolves_to_joplin_pg[joplin_get_note]>
+        Each Joplin tool in graph_tools.NOTE_TOOLS comes from joplin_pg, not joplin_mcp.
+      <Function test_note_tool_resolves_to_joplin_pg[joplin_search_notes]>
+        Each Joplin tool in graph_tools.NOTE_TOOLS comes from joplin_pg, not joplin_mcp.
+      <Function test_note_tool_resolves_to_joplin_pg[joplin_list_notebooks]>
+        Each Joplin tool in graph_tools.NOTE_TOOLS comes from joplin_pg, not joplin_mcp.
+      <Function test_note_tool_resolves_to_joplin_pg[joplin_list_tags]>
+        Each Joplin tool in graph_tools.NOTE_TOOLS comes from joplin_pg, not joplin_mcp.
+      <Function test_note_tool_resolves_to_joplin_pg[joplin_get_tags_for_note]>
+        Each Joplin tool in graph_tools.NOTE_TOOLS comes from joplin_pg, not joplin_mcp.
+      <Function test_note_tool_resolves_to_joplin_pg[joplin_upload_resource]>
+        Each Joplin tool in graph_tools.NOTE_TOOLS comes from joplin_pg, not joplin_mcp.
+      <Function test_note_tool_resolves_to_joplin_pg[joplin_ping]>
+        Each Joplin tool in graph_tools.NOTE_TOOLS comes from joplin_pg, not joplin_mcp.
+      <Function test_tools_package_exports_joplin_pg[joplin_create_notebook]>
+        tools.__init__ exports the joplin_pg version of each tool.
+      <Function test_tools_package_exports_joplin_pg[joplin_create_note]>
+        tools.__init__ exports the joplin_pg version of each tool.
+      <Function test_tools_package_exports_joplin_pg[joplin_update_note]>
+        tools.__init__ exports the joplin_pg version of each tool.
+      <Function test_tools_package_exports_joplin_pg[joplin_edit_note]>
+        tools.__init__ exports the joplin_pg version of each tool.
+      <Function test_tools_package_exports_joplin_pg[joplin_delete_note]>
+        tools.__init__ exports the joplin_pg version of each tool.
+      <Function test_tools_package_exports_joplin_pg[joplin_get_note]>
+        tools.__init__ exports the joplin_pg version of each tool.
+      <Function test_tools_package_exports_joplin_pg[joplin_search_notes]>
+        tools.__init__ exports the joplin_pg version of each tool.
+      <Function test_tools_package_exports_joplin_pg[joplin_list_notebooks]>
+        tools.__init__ exports the joplin_pg version of each tool.
+      <Function test_tools_package_exports_joplin_pg[joplin_list_tags]>
+        tools.__init__ exports the joplin_pg version of each tool.
+      <Function test_tools_package_exports_joplin_pg[joplin_get_tags_for_note]>
+        tools.__init__ exports the joplin_pg version of each tool.
+      <Function test_tools_package_exports_joplin_pg[joplin_upload_resource]>
+        tools.__init__ exports the joplin_pg version of each tool.
+      <Function test_tools_package_exports_joplin_pg[joplin_ping]>
+        tools.__init__ exports the joplin_pg version of each tool.
+      <Function test_joplin_pg_tools_have_no_httpx_dependency[joplin_create_notebook]>
+        Verify that the joplin_pg module and tool functions don't reference httpx.
+      <Function test_joplin_pg_tools_have_no_httpx_dependency[joplin_create_note]>
+        Verify that the joplin_pg module and tool functions don't reference httpx.
+      <Function test_joplin_pg_tools_have_no_httpx_dependency[joplin_update_note]>
+        Verify that the joplin_pg module and tool functions don't reference httpx.
+      <Function test_joplin_pg_tools_have_no_httpx_dependency[joplin_edit_note]>
+        Verify that the joplin_pg module and tool functions don't reference httpx.
+      <Function test_joplin_pg_tools_have_no_httpx_dependency[joplin_delete_note]>
+        Verify that the joplin_pg module and tool functions don't reference httpx.
+      <Function test_joplin_pg_tools_have_no_httpx_dependency[joplin_get_note]>
+        Verify that the joplin_pg module and tool functions don't reference httpx.
+      <Function test_joplin_pg_tools_have_no_httpx_dependency[joplin_search_notes]>
+        Verify that the joplin_pg module and tool functions don't reference httpx.
+      <Function test_joplin_pg_tools_have_no_httpx_dependency[joplin_list_notebooks]>
+        Verify that the joplin_pg module and tool functions don't reference httpx.
+      <Function test_joplin_pg_tools_have_no_httpx_dependency[joplin_list_tags]>
+        Verify that the joplin_pg module and tool functions don't reference httpx.
+      <Function test_joplin_pg_tools_have_no_httpx_dependency[joplin_get_tags_for_note]>
+        Verify that the joplin_pg module and tool functions don't reference httpx.
+      <Function test_joplin_pg_tools_have_no_httpx_dependency[joplin_upload_resource]>
+        Verify that the joplin_pg module and tool functions don't reference httpx.
+      <Function test_joplin_pg_tools_have_no_httpx_dependency[joplin_ping]>
+        Verify that the joplin_pg module and tool functions don't reference httpx.
+      <Coroutine test_joplin_tool_uses_pg_pool_not_httpx[joplin_create_notebook]>
+        Each Joplin tool calls through pool.connection() — no httpx involved.
+      <Coroutine test_joplin_tool_uses_pg_pool_not_httpx[joplin_create_note]>
+        Each Joplin tool calls through pool.connection() — no httpx involved.
+      <Coroutine test_joplin_tool_uses_pg_pool_not_httpx[joplin_update_note]>
+        Each Joplin tool calls through pool.connection() — no httpx involved.
+      <Coroutine test_joplin_tool_uses_pg_pool_not_httpx[joplin_edit_note]>
+        Each Joplin tool calls through pool.connection() — no httpx involved.
+      <Coroutine test_joplin_tool_uses_pg_pool_not_httpx[joplin_delete_note]>
+        Each Joplin tool calls through pool.connection() — no httpx involved.
+      <Coroutine test_joplin_tool_uses_pg_pool_not_httpx[joplin_get_note]>
+        Each Joplin tool calls through pool.connection() — no httpx involved.
+      <Coroutine test_joplin_tool_uses_pg_pool_not_httpx[joplin_search_notes]>
+        Each Joplin tool calls through pool.connection() — no httpx involved.
+      <Coroutine test_joplin_tool_uses_pg_pool_not_httpx[joplin_list_notebooks]>
+        Each Joplin tool calls through pool.connection() — no httpx involved.
+      <Coroutine test_joplin_tool_uses_pg_pool_not_httpx[joplin_list_tags]>
+        Each Joplin tool calls through pool.connection() — no httpx involved.
+      <Coroutine test_joplin_tool_uses_pg_pool_not_httpx[joplin_get_tags_for_note]>
+        Each Joplin tool calls through pool.connection() — no httpx involved.
+      <Coroutine test_joplin_tool_uses_pg_pool_not_httpx[joplin_upload_resource]>
+        Each Joplin tool calls through pool.connection() — no httpx involved.
+      <Coroutine test_joplin_tool_uses_pg_pool_not_httpx[joplin_ping]>
+        Each Joplin tool calls through pool.connection() — no httpx involved.
+      <Function test_import_resolution_joplin_pg_wins>
+        Verify that importing from the tools package gives us joplin_pg functions.
+      <Function test_joplin_mcp_deprecation_warning>
+        Importing joplin_mcp should emit a DeprecationWarning.
+      <Function test_joplin_mcp_still_importable>
+        joplin_mcp.py should still be importable (not deleted).
+      <Function test_no_joplin_mcp_aliases_in_tools_package>
+        tools.__init__ should no longer export joplin_mcp_* aliases.
+      <Function test_joplin_pg_source_no_httpx>
+        joplin_pg.py source should not contain any httpx references.
+      <Function test_joplin_mcp_source_uses_httpx>
+        joplin_mcp.py should still use httpx (it's the HTTP proxy module).
+    <Module test_memory_pool.py>
+      Tests that memory tools use the shared connection pool instead of raw psycopg.
+      
+      RED phase (TDD): These tests verify that every memory tool function acquires
+      connections via ``get_pool("agent_kb").connection()`` rather than calling
+      ``psycopg.AsyncConnection.connect()`` directly.
+      <Coroutine test_save_memory_uses_pool>
+      <Coroutine test_recall_memory_uses_pool>
+      <Coroutine test_update_memory_uses_pool>
+      <Coroutine test_delete_memory_uses_pool>
+      <Coroutine test_recall_memory_by_category_uses_pool>
+      <Coroutine test_summarize_memories_uses_pool>
+      <Function test_no_psyco_import_in_memory_module>
+        The refactored module should not import psycopg at module level.
+      <Coroutine test_get_pool_called_with_agent_kb>
+    <Module test_openai_compat.py>
+      Tests for OpenAI-compatible /v1/chat/completions and /v1/models endpoints.
+      
+      These tests mock the LangGraph agent to verify the OpenAI format conversion
+      without requiring a running LLM backend.
+      
+      Run:
+        pytest tests/test_openai_compat.py -v
+      <Class TestV1Models>
+        <Function test_returns_model_list>
+          GET /v1/models returns OpenAI-compatible model list.
+        <Function test_model_has_required_fields>
+          Each model in the list has id, object, owned_by.
+      <Class TestV1ChatCompletions>
+        <Function test_rejects_empty_messages>
+          POST /v1/chat/completions with no user message returns 400.
+        <Function test_stream_format_basic>
+          SSE chunks have OpenAI chat.completion.chunk structure.
+        <Function test_stream_ends_with_done>
+          Stream ends with 'data: [DONE]'.
+        <Function test_final_chunk_has_stop_reason>
+          Second-to-last chunk has finish_reason: 'stop'.
+        <Function test_messages_extraction_uses_last_user>
+          The last user message in the messages array is used as the query.
+        <Function test_tool_calls_converted>
+          Tool start events are converted to OpenAI tool_calls format.
+        <Function test_chatcmpl_id_consistent>
+          All chunks in a stream share the same chatcmpl- ID.
+        <Function test_delta_role_only_on_first_chunk>
+          The 'role' field in delta appears only on the first chunk.
+    <Module test_pipeline.py>
+      End-to-end pipeline test — verify the full OpenWebUI -> Pipeline -> Agent chain.
+      
+      This test is marked as slow and integration; it requires the full stack to be running.
+      Run with:
+        pytest tests/test_pipeline.py -v -m integration
+      <Function test_pipeline_streaming_happy_path>
+        Send a minimal message through the pipeline streaming endpoint and verify tokens flow.
+      <Function test_pipeline_non_streaming_happy_path>
+        Send a minimal message through /chat/sync and verify response shape.
+    <Module test_pipeline_joplin.py>
+      Tests verifying Joplin enrichment dedup — the pipeline no longer fetches Joplin notes.
+      
+      The agent already fetches Joplin content via its own tools (joplin_pg.py),
+      so the pipeline's redundant Joplin enrichment code was removed.
+      <Function test_fetch_joplin_note_removed>
+        _fetch_joplin_note should not exist on Pipeline instances.
+      <Function test_enrich_with_joplin_removed>
+        _enrich_with_joplin should not exist on Pipeline instances.
+      <Function test_joplin_mcp_url_not_in_valves>
+        JOPLIN_MCP_URL should not be a field on Valves.
+      <Function test_joplin_mcp_url_not_in_valves_instance>
+        Pipeline instances should not carry JOPLIN_MCP_URL.
+      <Function test_no_joplin_url_fetch_in_source>
+        The pipeline source should not contain joplin:// URL-fetching logic.
+      <Function test_no_enrich_with_joplin_in_source>
+        The pipeline source should not reference _enrich_with_joplin.
+      <Function test_no_fetch_joplin_note_in_source>
+        The pipeline source should not reference _fetch_joplin_note.
+      <Function test_no_joplin_mcp_url_in_source>
+        The pipeline source should not reference JOPLIN_MCP_URL.
+      <Function test_streaming_produces_output>
+        Streaming pipeline should yield tokens when the agent responds.
+      <Function test_sync_pipe_produces_output>
+        Non-streaming pipe() should return content from /chat/sync.
+    <Module test_registry.py>
+      Tests for ingestion.registry — SourceRegistry + sources.yaml plugin system.
+      
+      TDD: These tests are written FIRST. They define the contract for:
+        - YAML parsing of sources.yaml
+        - Required field validation (name, module, schedule, conflict_strategy)
+        - Auto-discovery of ingest_*.py files not declared in YAML
+        - Missing module detection
+        - Duplicate name detection
+        - Enabled/disabled filtering
+        - Flexible entry point: main_async or main
+        - Programmatic registration
+      <Class TestYAMLParsing>
+        <Function test_loads_sources_from_yaml_file>
+          Registry can parse a valid sources.yaml file.
+        <Function test_loads_default_sources_yaml_when_no_path>
+          Registry falls back to ingestion/sources.yaml when config_path is None.
+        <Function test_empty_sources_key_yields_no_yaml_entries>
+          An empty sources dict is valid — auto-discovery still runs.
+      <Class TestRequiredFields>
+        <Function test_missing_module_raises>
+          A source entry without 'module' should raise ValueError.
+        <Function test_missing_conflict_raises>
+          A source entry without 'conflict' should raise ValueError.
+        <Function test_missing_schedule_is_allowed_for_manual_sources>
+          Sources without a schedule (manual-only) are valid — schedule defaults to None.
+      <Class TestAutoDiscovery>
+        <Function test_discovers_14_ingest_scripts>
+          Auto-discovery should find all 14 ingest_*.py files.
+        <Function test_yaml_entries_take_precedence_over_discovery>
+          If a source is in YAML, those settings win; auto-discovery doesn't overwrite.
+      <Class TestMissingModuleDetection>
+        <Function test_nonexistent_module_raises>
+          A YAML entry referencing a nonexistent module should raise.
+        <Function test_module_without_entry_point_raises>
+          A module that exists but has neither main_async nor main should raise.
+      <Class TestDuplicateNameDetection>
+        <Function test_duplicate_name_in_yaml_raises>
+          Duplicate source names in YAML should raise ValueError.
+      <Class TestEnabledFiltering>
+        <Function test_list_sources_enabled_only>
+          list_sources(enabled_only=True) should exclude disabled sources.
+        <Function test_list_sources_all_includes_disabled>
+          list_sources(enabled_only=False) should include disabled sources.
+      <Class TestEntryPoint>
+        <Function test_wikipedia_has_main_not_main_async>
+          ingest_wikipedia.py has main() but not main_async() — should still resolve.
+        <Function test_arxiv_has_main_async>
+          ingest_arxiv.py has main_async — should resolve to that.
+      <Class TestSourceEntryDataclass>
+        <Function test_has_required_fields>
+          SourceEntry dataclass has all required fields.
+        <Function test_get_source_returns_source_entry>
+          get_source returns a SourceEntry instance.
+      <Class TestProgrammaticRegistration>
+        <Function test_register_source_programmatically>
+          register_source allows adding a source at runtime.
+        <Function test_register_invalid_source_raises>
+          register_source with missing required fields raises.
+    <Module test_scheduler_registry.py>
+      Tests for scheduler-registry decoupling — scheduler uses SourceRegistry instead of
+      direct imports.
+      
+      TDD (RED-GREEN-REFACTOR): These tests are written FIRST. They define the contract
+      for:
+        - Scheduler can resolve all 7 scheduled sources via the registry
+        - Missing source gives clear KeyError (not ImportError)
+        - Registry handles ingest_wikipedia.py's sync main() entry point
+        - The scheduler adapter (run_source) calls entry_point() correctly
+        - Async entry points are awaited; sync entry points are called directly
+      <Class TestSchedulerResolvesAllSources>
+        <Function test_all_scheduled_sources_found_in_registry>
+          All 7 scheduled sources can be resolved from the real registry.
+        <Function test_all_scheduled_sources_have_entry_points>
+          Each scheduled source exposes a callable entry point.
+      <Class TestMissingSourceError>
+        <Function test_missing_source_raises_key_error>
+          Looking up a nonexistent source raises KeyError, not ImportError.
+        <Coroutine test_missing_source_in_run_source_raises_key_error>
+          run_source with unknown name raises a clear KeyError mentioning the source.
+        <Coroutine test_run_source_wraps_key_error_with_context>
+          run_source on missing source raises an error that mentions the source name.
+      <Class TestSyncEntryPoint>
+        <Function test_wikipedia_resolves_main_via_get_entry_point>
+          ingest_wikipedia has main() but not main_async — get_entry_point resolves it.
+        <Function test_wikipedia_entry_point_is_sync_main>
+          ingest_wikipedia.get_entry_point() returns the sync main function.
+      <Class TestRunSourceAdapter>
+        <Coroutine test_run_source_calls_async_entry_point>
+          run_source awaits main_async when it's the entry point.
+        <Coroutine test_run_source_calls_sync_entry_point>
+          run_source calls main() directly when it's the entry point (not async).
+        <Coroutine test_run_source_surfaces_source_name_on_failure>
+          When entry point raises, run_source re-raises with source name context.
+        <Function test_run_source_detects_async_vs_sync_entry_point>
+          run_source correctly detects coroutine functions vs regular functions.
+    <Module test_stuck_jobs.py>
+      Tests for stuck ingestion job recovery.
+      <Class TestRecoverStuckJobs>
+        Tests for recover_stuck_jobs().
+        <Coroutine test_marks_old_running_jobs_as_failed>
+          Jobs running >2h should be marked as failed.
+        <Coroutine test_returns_count_of_recovered_jobs>
+          Should return the exact count of jobs that were recovered.
+        <Coroutine test_does_not_touch_recent_running_jobs>
+          With a very large timeout, recent running jobs should not be touched.
+          
+          Verifies the SQL uses the timeout_hours parameter correctly — if we pass
+          timeout_hours=10000, the INTERVAL clause should reflect that.
+        <Coroutine test_does_not_touch_done_or_failed_jobs>
+          The SQL should only update rows WHERE status='running', not done/failed.
+        <Coroutine test_custom_timeout_via_env_variable>
+          If timeout_hours is None, should read from INGESTION_JOB_TIMEOUT_HOURS env var.
+        <Coroutine test_default_timeout_is_2_hours>
+          Without env var or explicit timeout, default should be 2 hours.
+        <Coroutine test_zero_recovered_returns_zero>
+          When no stuck jobs exist, should return 0.
+    <Module test_workspace_tools.py>
+      Tests for workspace management tools.
+      <Coroutine test_list_workspace>
+      <Coroutine test_read_workspace_file>
+      <Coroutine test_write_workspace_file>
+      <Coroutine test_make_workspace_dir>
+      <Coroutine test_delete_workspace_item>
+      <Coroutine test_move_workspace_item>
+      <Coroutine test_execute_bash_command>
+      <Coroutine test_write_and_execute_script>
+      <Coroutine test_execute_workspace_script>
+
+========================= 365 tests collected in 0.49s =========================
+=== pytest collection summary ===
+========================= 365 tests collected in 0.35s =========================

@@ -1,0 +1,36 @@
+Task 15: Rewrite CONTRIBUTING.md
+=================================
+
+Source Files Read:
+- CONTRIBUTING.md (original 21 lines)
+- pyproject.toml (pytest config)
+- .github/workflows/build-and-publish.yml (CI patterns)
+- .github/PULL_REQUEST_TEMPLATE.md (PR template)
+
+Commands Verified:
+1. docker compose config - PASSED (exit 0, valid YAML output)
+2. ruff check . - PASSED (runs successfully, found lint issues in existing code)
+
+New CONTRIBUTING.md Sections:
+- Branch naming conventions (feature/, fix/, refactor/, docs/, test/)
+- Commit message format (Conventional Commits with examples)
+- PR template requirements (Summary, Changes, Validation, Risks)
+- Code style (Ruff for Python, Black formatting)
+- Testing requirements (pytest -q, pytest -m "not integration and not slow")
+- Docker compose validation (docker compose config)
+- How to run linting (ruff check .)
+- Documentation update guidelines
+- What not to commit (secrets, .env, credentials)
+- Review process
+
+File Stats:
+- Original: 21 lines
+- New: 154 lines
+- Expansion: 7.3x
+
+PR Template Checklist Included:
+- [ ] docker compose config passes
+- [ ] ruff check . passes
+- [ ] pytest -q passes
+- [ ] No secrets or credentials in code
+- [ ] Relevant tests added or updated

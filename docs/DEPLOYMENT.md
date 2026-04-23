@@ -1,5 +1,8 @@
 # Deployment
 
+> For environment-variable reference, see [`docs/CONFIGURATION.md`](CONFIGURATION.md).
+> This document focuses on deployment options and day-to-day operations.
+
 ## Local Docker Deployment (Baseline)
 
 ### Option A: Build locally
@@ -30,9 +33,56 @@ Verify:
 - OpenWebUI: `http://localhost:3000` (legacy)
 - Agent: `http://localhost:8000/health`
 - Pipelines: `http://localhost:9099/` (legacy)
-- Analysis server: `http://localhost:8095/health`
+- Analysis server: `http://pi_agent_analysis:8000` (internal Docker network, no host port mapped)
 - Joplin Server: `http://localhost:22300`
 - SearXNG: `http://localhost:8080`
+
+### Frontend Environment Variables
+
+The frontend (`assistant-ui`) is built and run as a Docker service. It reads two agent-related URLs at runtime via environment variables declared in `docker-compose.yml`:
+
+| Variable | Purpose |
+|----------|---------|
+| `NEXT_PUBLIC_AGENT_URL` | Public agent API URL — must be reachable from the **user's browser** (e.g. `http://localhost:8000` for local, or `https://api.example.com` in production). |
+| `AGENT_INTERNAL_URL` | Internal agent API URL — used by Next.js SSR **inside Docker** for server-side calls. Defaults to `http://pi_agent_backend:8000` in the compose stack. |
+
+> These are set in the `frontend` service block in `docker-compose.yml`.
+> See [`docs/CONFIGURATION.md`](CONFIGURATION.md#frontend) for the full environment-variable reference.
+
+## Scheduler Operations
+
+The scheduler container (`pi_agent_scheduler`) manages recurring ingestion jobs (arXiv, bioRxiv, news, forex, World Bank, Joplin sync) and background maintenance tasks.
+
+Use `pi-ctl.sh` to manage it:
+
+```bash
+./pi-ctl.sh ingest start   # Start the scheduler container
+./pi-ctl.sh ingest stop    # Stop the scheduler container
+./pi-ctl.sh ingest status  # Show the scheduler container status
+```
+
+**Prerequisites:** The scheduler requires external API keys to be set in `.env` before starting. Without these, the corresponding sources will silently skip their jobs.
+
+| Required Key | Used By |
+|--------------|---------|
+| `NEWS_API_KEY` | Daily news ingestion (`ingest_news_api`) |
+
+**Health check guidance:**
+
+1. After starting, confirm the container is up:
+   ```bash
+   ./pi-ctl.sh ingest status
+   ```
+2. Verify ingestion is active by checking the agent API:
+   ```bash
+   curl -sS http://localhost:8000/ingestion/status
+   ```
+3. Review scheduler logs for any API-key failures or skipped jobs:
+   ```bash
+   docker logs pi_agent_scheduler --tail 100
+   ```
+
+**Important:** The scheduler and the Wikipedia bulk ingest (`./pi-ctl.sh wiki start`) both embed content via Ollama. Running both simultaneously risks VRAM exhaustion. `pi-ctl.sh wiki start` will automatically stop the scheduler if it detects it running.
 
 ## Production Guidance
 
@@ -105,7 +155,7 @@ python backup_config.py
 If data is lost, restore from the latest GCS backup:
 ```bash
 gcloud storage cp gs://<bucket>/backups/latest/knowledge_chunks.parquet /tmp/
-# Then use the restore script or load directly with pandas → psycopg
+# Then load directly with pandas → psycopg
 ```
 
 ### Joplin Server Admin

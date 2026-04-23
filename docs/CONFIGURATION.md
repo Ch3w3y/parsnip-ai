@@ -20,6 +20,24 @@ Use `.env.example` as the public contract. Keep real `.env` files out of git.
 database. In the compose stack this points at the same PostgreSQL service but a
 separate `joplin` database.
 
+## Circuit Breaker State
+
+| Variable | Purpose |
+|----------|---------|
+| `PARSNIP_CIRCUIT_BREAKER_PATH` | Path to the circuit-breaker state file for OpenRouter rate-quota protection. Default: `/tmp/parsnip_circuit_breaker.json`. State persists across workers and auto-resets after 5 minutes of cooldown.
+
+## Guardrail Modes
+
+`GUARDRAIL_MODE` controls the runtime strictness of guardrails and fallback behavior:
+
+| Value | Behavior |
+|-------|----------|
+| `strict` | All guardrails enforced: strict message length limits, aggressive history pruning, immediate circuit-breaker trip on any rate/limit error, no fallback attempts. |
+| `balanced` (default) | Reasonable defaults: moderate message limits, adaptive history pruning, 5-minute circuit-breaker cooldown with automatic reset, cascading fallback through model tiers. |
+| `lenient` | Minimal enforcement: relaxed message limits, reduced history pruning, extended circuit-breaker cooldown, favors continued operation over strict constraints. |
+
+The circuit breaker implements rate-quota protection by tripping when OpenRouter returns 403/429/402 errors. It automatically resets after the configured cooldown period.
+
 ## Model Aliases
 
 The codebase uses stable aliases so prompts, graph code, and tests stay portable
@@ -84,7 +102,7 @@ for OpenAI-compatible clients.
 | `OLLAMA_API_KEY` | API key for hosted Ollama-compatible endpoints when needed. |
 | `OLLAMA_CLOUD_URL` | Hosted Ollama-compatible base URL. |
 | `OLLAMA_SSH_HOST` | Optional host used by helper scripts. |
-| `EMBED_MODEL` | Embedding model used for general text chunks. |
+| `EMBED_MODEL` | Embedding model used for general text chunks. For source-specific embedding configuration (e.g., `bge-m3` for GitHub code), see [`docs/ROUTING.md`](ROUTING.md#source_model_map--embedding-model-per-source). |
 
 Optional GPU routing variables:
 
@@ -113,7 +131,7 @@ Optional GPU routing variables:
 | `JOPLIN_ADMIN_PASSWORD` | Admin password used by setup/bootstrap scripts. |
 | `JOPLIN_SERVER_URL` | Internal server URL. |
 | `JOPLIN_BASE_URL` | Public/base URL expected by Joplin Server. |
-| `JOPLIN_MCP_URL` | Joplin MCP bridge URL used by the agent. |
+| `JOPLIN_MCP_URL` | **Deprecated**. Legacy MCP bridge URL. Agent now uses `joplin_pg.py` (PostgreSQL direct access). Kept for backward compatibility only.
 
 Joplin Server creates its initial admin account only when its database is empty.
 If a database is recreated, run the Joplin admin repair script documented in

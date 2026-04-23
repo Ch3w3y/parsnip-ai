@@ -1,0 +1,159 @@
+{
+  "task": "API Reference Documentation",
+  "timestamp": "2026-04-23T00:00:00Z",
+  "files_created": [
+    "docs/API_REFERENCE.md"
+  ],
+  "endpoints_verified": [
+    {
+      "path": "/v1/chat/completions",
+      "method": "POST",
+      "source": "agent/main.py:217",
+      "description": "OpenAI-compatible streaming chat endpoint"
+    },
+    {
+      "path": "/chat",
+      "method": "POST",
+      "source": "agent/main.py:139",
+      "description": "Native streaming chat endpoint"
+    },
+    {
+      "path": "/chat/sync",
+      "method": "POST",
+      "source": "agent/main.py:378",
+      "description": "Non-streaming chat for testing"
+    },
+    {
+      "path": "/v1/models",
+      "method": "GET",
+      "source": "agent/main.py:202",
+      "description": "OpenAI-compatible model list"
+    },
+    {
+      "path": "/health",
+      "method": "GET",
+      "source": "agent/main.py:134",
+      "description": "Health check endpoint"
+    },
+    {
+      "path": "/stats",
+      "method": "GET",
+      "source": "agent/main.py:491",
+      "description": "Knowledge base statistics"
+    },
+    {
+      "path": "/ingestion/status",
+      "method": "GET",
+      "source": "agent/main.py:534",
+      "description": "Ingestion job overview"
+    },
+    {
+      "path": "/upload/pdf",
+      "method": "POST",
+      "source": "agent/main.py:596",
+      "description": "PDF upload and embedding"
+    },
+    {
+      "path": "/threads/{thread_id}",
+      "method": "GET",
+      "source": "agent/main.py:410",
+      "description": "Conversation history"
+    },
+    {
+      "path": "/sessions/save",
+      "method": "POST",
+      "source": "agent/main.py:625",
+      "description": "Save research session"
+    },
+    {
+      "path": "/sessions",
+      "method": "GET",
+      "source": "agent/main.py:689",
+      "description": "List saved sessions"
+    },
+    {
+      "path": "/sessions/{session_id}",
+      "method": "GET",
+      "source": "agent/main.py:724",
+      "description": "Get saved session details"
+    },
+    {
+      "path": "/sessions/{session_id}/export",
+      "method": "GET",
+      "source": "agent/main.py:757",
+      "description": "Export session as markdown"
+    },
+    {
+      "path": "/models",
+      "method": "GET",
+      "source": "agent/main.py:802",
+      "description": "List OpenRouter models"
+    },
+    {
+      "path": "/memories",
+      "method": "GET",
+      "source": "agent/main.py:426",
+      "description": "List long-term memories"
+    },
+    {
+      "path": "/memories/{memory_id}",
+      "method": "DELETE",
+      "source": "agent/main.py:469",
+      "description": "Soft-delete a memory"
+    }
+  ],
+  "streaming_format": {
+    "type": "Server-Sent Events (SSE)",
+    "media_type": "text/event-stream",
+    "openai_format": {
+      "id": "chatcmpl-...",
+      "object": "chat.completion.chunk",
+      "created": 1713888000,
+      "model": "parsnip-agent",
+      "choices": [{
+        "index": 0,
+        "delta": {"role": "assistant", "content": "..."},
+        "finish_reason": null
+      }]
+    },
+    "native_format": {
+      "type": "token|tool_start|tool_end|done",
+      "content": "...",
+      "thread_id": "...",
+      "tool": "...",
+      "model_id": "..."
+    }
+  },
+  "curl_examples": {
+    "openai_chat": {
+      "command": "curl -sS http://localhost:8000/v1/chat/completions -H \"Content-Type: application/json\" -d '{\"model\":\"parsnip-agent\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello!\"}],\"stream\":true}'",
+      "note": "Streaming output - filter with grep -v '^data: \\[DONE\\]$'"
+    },
+    "sync_chat": {
+      "command": "curl -sS http://localhost:8000/chat/sync -H \"Content-Type: application/json\" -d '{\"message\":\"What is 2+2?\",\"thread_id\":\"test-thread\"}'",
+      "expected_response": "ChatResponse with thread_id, content, model_id"
+    },
+    "health": {
+      "command": "curl -sS http://localhost:8000/health",
+      "expected_response": "{\"status\":\"ok\",\"agent_ready\":true}"
+    },
+    "stats": {
+      "command": "curl -sS http://localhost:8000/stats",
+      "expected_response": "{\"knowledge_base\":[...],\"ingestion_jobs\":[...]}"
+    },
+    "upload_pdf": {
+      "command": "curl -sS http://localhost:8000/upload/pdf -F \"file=@/path/to/document.pdf\"",
+      "expected_response": "{\"status\":\"ok\",\"message\":\"...\",\"chunks\":N,\"pages\":N}"
+    }
+  },
+  "auto_docs_url": "http://localhost:8000/docs",
+  "authentication": "None (local-first)",
+  "base_url": "http://localhost:8000",
+  "source_code_analysis": {
+    "main_file": "agent/main.py",
+    "total_routes": 18,
+    "framework": "FastAPI",
+    "langgraph_integration": true,
+    "openai_compat": true
+  }
+}

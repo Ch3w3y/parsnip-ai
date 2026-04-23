@@ -6,18 +6,22 @@ All scripts run via `uv run python <script>` from the `ingestion/` directory. Sh
 
 | Script | Source | Conflict | Schedule |
 |--------|--------|----------|----------|
-| `ingest_wikipedia.py` | Wikipedia dump (6.7M articles) | `DO UPDATE` | One-time seed + weekly updates |
-| `ingest_wikipedia_updates.py` | MediaWiki recentchanges API | `DO UPDATE` | Weekly Sun 02:00 UTC, gated until seed completion |
 | `ingest_arxiv.py` | arXiv API abstracts | `DO NOTHING` | Weekly Mon 03:00 UTC |
 | `ingest_biorxiv.py` | bioRxiv/medRxiv API | `DO NOTHING` | Weekly Tue 03:00 UTC |
-| `ingest_news_api.py` | NewsAPI.org (150k+ sources) | `DO NOTHING` | Daily 06:00 UTC |
 | `ingest_forex.py` | Exchange-rate time series | `DO UPDATE` | Daily 07:00 UTC |
+| `ingest_joplin.py` | Joplin Server notes | `DO UPDATE` | Every 6h |
+| `ingest_news_api.py` | NewsAPI.org (150k+ sources) | `DO NOTHING` | Daily 06:00 UTC |
 | `ingest_worldbank.py` | World Bank indicators | `DO UPDATE` | Weekly Sun 04:00 UTC |
-| `ingest_news.py` | RSS feeds (fallback) | `DO NOTHING` | Manual only |
-| `ingest_joplin.py` | Joplin Server notes | `DO UPDATE` | Watcher polls every 30s; scheduler safety every 6h |
+| `ingest_wikipedia_updates.py` | MediaWiki recentchanges API | `DO UPDATE` | Weekly Sun 02:00 UTC, gated until seed completion |
 | `ingest_github.py` | GitHub repos (source + docs) | `DO UPDATE` | Manual only |
+| `ingest_hackernews.py` | Hacker News stories | `DO UPDATE` | Manual only |
+| `ingest_news.py` | RSS feeds (fallback) | `DO NOTHING` | Manual only |
+| `ingest_pubmed.py` | PubMed abstracts | `DO NOTHING` | Manual only |
+| `ingest_rss.py` | RSS feeds | `DO UPDATE` | Manual only |
+| `ingest_ssrn.py` | SSRN papers | `DO UPDATE` | Manual only |
+| `ingest_wikipedia.py` | Wikipedia dump (6.7M articles) | `DO UPDATE` | Manual only |
 
-**Conflict strategy rationale:** Wikipedia and Joplin notes change over time → overwrite. arXiv, bioRxiv, and news articles are immutable once published → skip duplicates. GitHub repos change → overwrite content+embedding, preserve `created_at`, set `updated_at`.
+**Conflict strategy rationale:** Sources with immutable content (papers, articles) → `skip` duplicates (arXiv, bioRxiv, PubMed, RSS feeds). Sources that change over time → `update` content+embedding, preserve `created_at`, set `updated_at` (Wikipedia, Joplin notes, GitHub repos, forex rates, World Bank indicators, Hacker News, SSRN papers, RSS feeds).
 
 ## Shared Utilities (`utils.py`)
 

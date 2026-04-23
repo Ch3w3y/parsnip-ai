@@ -1,0 +1,39 @@
+# Port Reference Audit Evidence
+# Generated: 2026-04-23
+
+## :3000 References (OpenWebUI Legacy)
+Total: 8 matches found
+
+1. README.md:49 - "OpenWebUI :3000" - LEGIT (legacy mention)
+2. README.md:157 - "OpenWebUI: localhost:3000 (legacy)" - LEGIT
+3. README.md:168 - "curl localhost:3000/api/config" - LEGIT (legacy API)
+4. docs/ARCHITECTURE_VISUALS.md:17 - "OpenWebUI<br/>:3000" - LEGIT (legacy)
+5. docs/DEPLOYMENT.md:33 - "OpenWebUI: localhost:3000 (legacy)" - LEGIT
+6. docs/FRONTEND.md:250 - "Next.js dev server on localhost:3000" - ERROR (should be :3001)
+7. docs/FRONTEND.md:288 - "OpenWebUI (legacy) | localhost:3000" - LEGIT
+8. docs/TROUBLESHOOTING.md:200 - "3002:3000" - LEGIT (Docker port mapping)
+9. docs/TROUBLESHOOTING.md:214 - "3002:3000" - LEGIT (Docker port mapping)
+
+## :3001 References (assistant-ui Primary)
+Total: 9 matches found
+
+1. README.md:44 - "assistant-ui (Next.js frontend :3001)" - LEGIT
+2. README.md:155 - "Frontend (assistant-ui): localhost:3001" - LEGIT
+3. docs/ARCHITECTURE_VISUALS.md:14 - "Frontend<br/>assistant-ui :3001" - LEGIT
+4. docs/DEPLOYMENT.md:32 - "Frontend (assistant-ui): localhost:3001" - LEGIT
+5. docs/FRONTEND.md:274 - "assistant-ui frontend: localhost:3001" - LEGIT
+6. docs/FRONTEND.md:287 - "assistant-ui (primary) | localhost:3001" - LEGIT
+7. docs/TROUBLESHOOTING.md:170 - "grep :3001" - LEGIT
+8. docs/TROUBLESHOOTING.md:173 - "lsof -i :3001" - LEGIT
+9. docs/TROUBLESHOOTING.md:189 - "kill ... -i :3001" - LEGIT
+10. ARCHITECTURE.md:11 - "assistant-ui<br/>Next.js :3001" - LEGIT
+
+## Bug: :3000 on Next.js
+FILE: docs/FRONTEND.md:250
+TEXT: "npm run dev        # Starts Next.js dev server on http://localhost:3000"
+CORRECT: Should be "http://localhost:3001"
+
+## Summary
+- OpenWebUI :3000: All references CORRECT (legacy)
+- assistant-ui :3001: All references CORRECT (primary)
+- BUG FOUND: docs/FRONTEND.md line 250 incorrectly says Next.js runs on :3000

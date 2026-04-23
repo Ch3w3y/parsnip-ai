@@ -53,6 +53,8 @@ PostgreSQL is the main durable store. It holds knowledge chunks, embeddings, ing
 
 For detailed diagrams, see [docs/ARCHITECTURE_VISUALS.md](docs/ARCHITECTURE_VISUALS.md).
 
+> **Platform note:** The analysis container is built for `linux/amd64` only. Upstream `rocker/tidyverse` does not publish `arm64` images, so it will not start on ARM hosts (e.g., Apple Silicon) without emulation.
+
 ## Core Services
 
 | Service | Default port | Purpose |
@@ -64,6 +66,7 @@ For detailed diagrams, see [docs/ARCHITECTURE_VISUALS.md](docs/ARCHITECTURE_VISU
 | PostgreSQL | `5432` | Knowledge base, vectors, memories, checkpoints, ingestion state |
 | Analysis Server | `8095` | Python/R/notebook execution and artifact serving |
 | Joplin Server | `22300` | Notebook storage and user-facing note sync |
+| Joplin MCP | `8090` | Deprecated Joplin tool bridge (legacy MCP HTTP bridge) |
 | SearXNG | `8080` | Local metasearch provider |
 | Scheduler | n/a | News, arXiv, Joplin, forex, World Bank, backup, and Wikipedia jobs |
 
@@ -135,6 +138,18 @@ Start the stack:
 docker compose up -d --build
 ```
 
+Or pull pre-built images instead of building locally:
+
+```bash
+IMAGE_TAG=0.1.0 docker compose up -d --no-build
+```
+
+Verify services are running:
+
+```bash
+./pi-ctl.sh status
+```
+
 Open:
 
 - Frontend (assistant-ui): `http://localhost:3001`
@@ -155,11 +170,36 @@ curl -sS http://localhost:3000/api/config
 
 Common workflows:
 
+- Start or stop the scheduler (arXiv, bioRxiv, news, Joplin watcher) with `./pi-ctl.sh ingest start` and `./pi-ctl.sh ingest stop`.
 - Start or stop Wikipedia ingestion with `./pi-ctl.sh wiki start` and `./pi-ctl.sh wiki stop`.
 - Check ingestion / migration health with `curl -sS http://localhost:8000/ingestion/status` or `python scripts/ingestion_status.py`.
 - Run a knowledge base report with `python scripts/kb_report.py`.
 - Back up KB data with `python scripts/backup_kb.py`.
 - Back up project configuration with `python scripts/backup_config.py`.
+
+## Testing
+
+Run the test suite:
+
+```bash
+pytest -q
+```
+
+Tests cover agent guardrails, circuit breaker, database pools, embedding routing, Joplin tools, memory, pipeline compatibility, registry, scheduler, workspace tools, and more. See `tests/` for the full suite.
+
+Operational helper scripts live in `scripts/`:
+
+| Script | Purpose |
+| --- | --- |
+| `backup_kb.py` | Back up knowledge base to Parquet |
+| `backup_config.py` | Back up project configuration |
+| `ingestion_status.py` | Check ingestion / migration health |
+| `kb_report.py` | Run a knowledge base report |
+| `download_wikipedia.sh` | Download Wikipedia dumps |
+| `fix-joplin-admin.sh` | Sync Joplin admin email after DB recreation |
+| `rocm_check.sh` | GPU/VRAM health check |
+| `rebuild_and_test_agent.sh` | Rebuild agent and run smoke tests |
+| `setup.sh` | Environment and dependency setup |
 
 ## Security Notes
 
@@ -174,9 +214,11 @@ Common workflows:
 - [Architecture diagrams](docs/ARCHITECTURE_VISUALS.md)
 - [Configuration](docs/CONFIGURATION.md)
 - [Deployment](docs/DEPLOYMENT.md)
+- [Routing configuration](docs/ROUTING.md)
 - [Storage and backup guidance](docs/STORAGE_AND_BACKUP.md)
 - [Extension guide](docs/EXTENDING.md)
 - [Hybrid RAG showcase](docs/HYBRID_RAG_SHOWCASE.md)
+- [Installation](INSTALL.md)
 - [Branding assets](docs/branding/README.md)
 
 ## License

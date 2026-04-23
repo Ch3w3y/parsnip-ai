@@ -66,14 +66,14 @@ When adding a new ingestion source:
 `detect_intent()` classifies the query into one of four intents using keyword
 regex matching, then `holistic_search` reorders KB source layers accordingly:
 
-| Intent | Trigger | Layer order (first → last) |
-|--------|---------|---------------------------|
-| `code` | ≥2 code keywords, or code > research && code > temporal | GitHub → News → Wikipedia → Joplin → arXiv/bioRxiv |
-| `research` | ≥2 research keywords | arXiv/bioRxiv → News → Wikipedia → Joplin → GitHub |
-| `current` | ≥1 temporal keyword | News → arXiv/bioRxiv → Wikipedia → Joplin → GitHub |
-| `general` | default (no dominant intent) | News → arXiv/bioRxiv → Wikipedia → Joplin → GitHub |
+| Intent | Trigger | Sources (exact order from `intent_layers`) |
+|--------|---------|-------------------------------------------|
+| `code` | ≥2 code keywords, or code > research && code > temporal | github → wikipedia → joplin_notes |
+| `research` | ≥2 research keywords | arxiv → biorxiv → wikipedia → news |
+| `current` | ≥1 temporal keyword | news → wikipedia |
+| `general` | default (no dominant intent) | wikipedia → github → joplin_notes → arxiv → news |
 
-Each layer is queried independently with its own budget (from `layer_budgets`).
+Each source is queried independently with its own budget (from `layer_budgets`).
 Layers with no relevant results are silently omitted.
 
 ### Layer Budgets
@@ -87,7 +87,7 @@ Layers with no relevant results are silently omitted.
 | `news` | 4 | |
 | `joplin_notes` | 2 | Personal notes are typically narrow |
 
-Budgets can be overridden per-intent in `_reorder_layers()`.
+Budgets are applied from `layer_budgets` per source. The `intent_layers` dict defines the exact source list per intent; no reordering is performed beyond this.
 
 ### Intent Keyword Regexes
 

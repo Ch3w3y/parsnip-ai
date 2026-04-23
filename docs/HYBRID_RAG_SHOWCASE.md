@@ -6,11 +6,11 @@ answer or analysis artifact.
 
 ## Retrieval Pattern
 
-1. **Classify the request** by complexity and intent.
+1. **Classify the request** by complexity and intent. See [Routing Configuration](ROUTING.md) for details on complexity scoring weights and intent classification.
 2. **Fetch current context** through web search or live APIs when freshness is
-   required.
+   required. See [Routing Configuration](ROUTING.md) for tiered search depth (low/mid/high).
 3. **Search the local KB** for background, prior notes, source documents, and
-   structured context.
+   structured context. See [Routing Configuration](ROUTING.md) for KB layer ordering via `intent_layers`.
 4. **Merge evidence** while preserving source identifiers.
 5. **Synthesize the answer** with citations, caveats, and optional analysis
    artifacts.

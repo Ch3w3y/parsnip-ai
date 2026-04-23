@@ -8,7 +8,7 @@ with pgvector, scheduled ingestion, and optional analysis/Joplin integrations.
 
 ```mermaid
 flowchart TD
-    User((User)) -->|Browser| FE[assistant-ui<br/>Next.js :3000]
+    User((User)) -->|Browser| FE[assistant-ui<br/>Next.js :3001]
     FE -->|/v1/chat/completions| Agent[Agent API<br/>:8000]
 
     subgraph Runtime[Agent runtime]
