@@ -10,7 +10,7 @@ from .knowledge_gaps import knowledge_gaps
 from .compare_sources import compare_sources
 from .find_similar import find_similar
 from .memory import save_memory, recall_memory, update_memory, delete_memory, recall_memory_by_category, summarize_memories
-from .joplin_mcp import (
+from .joplin_pg import (
     joplin_create_notebook,
     joplin_create_note,
     joplin_update_note,
@@ -23,6 +23,12 @@ from .joplin_mcp import (
     joplin_get_tags_for_note,
     joplin_upload_resource,
     joplin_ping,
+)
+from .joplin_hitl import (
+    generate_note,
+    detect_edits,
+    review_edited_note,
+    publish_review,
 )
 from .github import (
     github_search_repos,
@@ -83,6 +89,7 @@ __all__ = [
     "delete_memory",
     "recall_memory_by_category",
     "summarize_memories",
+    # joplin_pg (direct PG access versions)
     "joplin_create_notebook",
     "joplin_create_note",
     "joplin_update_note",
@@ -95,6 +102,11 @@ __all__ = [
     "joplin_get_tags_for_note",
     "joplin_upload_resource",
     "joplin_ping",
+    # joplin_hitl (HITL workflow tools)
+    "generate_note",
+    "detect_edits",
+    "review_edited_note",
+    "publish_review",
     "github_search_repos",
     "github_get_file",
     "github_list_commits",
