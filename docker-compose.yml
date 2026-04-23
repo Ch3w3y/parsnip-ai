@@ -135,6 +135,12 @@ services:
     volumes:
       - ./gcs-key.json:/app/gcs-key.json:ro
       - ./storage:/app/storage:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     depends_on:
       postgres:
         condition: service_healthy
@@ -258,6 +264,20 @@ services:
       - owui_data:/app/backend/data
     depends_on:
       - pipelines
+
+  # ── Frontend (assistant-ui / Next.js) ──────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: pi_agent_frontend
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - NEXT_PUBLIC_AGENT_URL=http://localhost:8000
+    depends_on:
+      agent:
+        condition: service_healthy
 
 volumes:
   pgdata:
