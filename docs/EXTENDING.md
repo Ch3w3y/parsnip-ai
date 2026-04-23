@@ -4,13 +4,15 @@
 
 Use the same four-stage pattern for new source types:
 1. Fetch source records.
-2. Save raw landing payload.
+2. Save raw landing payload (`save_raw()`).
 3. Transform/chunk/map metadata.
 4. Embed/upsert into target table(s).
 
 Recommended locations:
-- `ingestion/ingest_<source>.py`
-- scheduler registration in `scheduler/scheduler.py`
+- `ingestion/ingest_<source>.py with main_async() entry point`
+- `ingestion/sources.yaml` source registration (declarative; replaces manual scheduler edits)
+
+The `SourceRegistry` (`ingestion/registry.py`) auto-discovers `ingest_*.py` scripts and loads declarative definitions from `sources.yaml`. The scheduler consumes the registry via `scheduler/registry_adapter.py` — no wiring into `scheduler/scheduler.py` is required.
 
 ## Domain/Org Data Onboarding
 

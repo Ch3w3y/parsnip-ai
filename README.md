@@ -41,11 +41,13 @@ The runtime path is intentionally split into small services:
 
 ```text
 Browser
-  -> OpenWebUI
-  -> Pipelines adapter
-  -> Agent API
+  -> assistant-ui (Next.js frontend :3001)
+  -> Agent API (/v1/chat/completions)
   -> tools, retrieval, memory, analysis, notebook sync, web search
 ```
+
+`OpenWebUI :3000` and the pipelines adapter `:9099` remain available for
+backward compatibility during the transition.
 
 PostgreSQL is the main durable store. It holds knowledge chunks, embeddings, ingestion jobs, memory records, and LangGraph checkpoint state. Joplin Server uses its own database for notebook data. The analysis service writes generated files to a mounted output volume and can archive artifacts to object storage.
 
@@ -55,13 +57,13 @@ For detailed diagrams, see [docs/ARCHITECTURE_VISUALS.md](docs/ARCHITECTURE_VISU
 
 | Service | Default port | Purpose |
 | --- | ---: | --- |
-| OpenWebUI | `3000` | Browser UI and user-facing chat surface |
-| Pipelines | `9099` | OpenWebUI-compatible adapter for the research agent |
+| Frontend (assistant-ui) | `3001` | **Primary** browser UI — Next.js + assistant-ui React components |
+| OpenWebUI | `3000` | Legacy browser UI (backward compatibility during transition) |
+| Pipelines | `9099` | OpenWebUI-compatible adapter (legacy, backward compatibility) |
 | Agent API | `8000` | LangGraph orchestration, tools, memory, and streaming chat |
 | PostgreSQL | `5432` | Knowledge base, vectors, memories, checkpoints, ingestion state |
 | Analysis Server | `8095` | Python/R/notebook execution and artifact serving |
 | Joplin Server | `22300` | Notebook storage and user-facing note sync |
-| Joplin MCP | `8090` | Tool bridge for notebook operations |
 | SearXNG | `8080` | Local metasearch provider |
 | Scheduler | n/a | News, arXiv, Joplin, forex, World Bank, backup, and Wikipedia jobs |
 
@@ -135,9 +137,9 @@ docker compose up -d --build
 
 Open:
 
-- OpenWebUI: `http://localhost:3000`
+- Frontend (assistant-ui): `http://localhost:3001`
 - Agent API docs: `http://localhost:8000/docs`
-- Pipeline API: `http://localhost:9099`
+- OpenWebUI: `http://localhost:3000` (legacy)
 
 ## Operations
 

@@ -14,6 +14,7 @@ Use `.env.example` as the public contract. Keep real `.env` files out of git.
 | `DATABASE_URL` | Agent knowledge-base database URL. |
 | `WEBUI_SECRET_KEY` | OpenWebUI session/security secret. |
 | `LLM_PROVIDER` | Model provider mode: `openrouter` or `openai_compat`. |
+| `GUARDRAIL_MODE` | Runtime guardrail strictness (`strict`, `balanced`, `lenient`). Default: `balanced`.
 
 `JOPLIN_DATABASE_URL` is used by backup tooling when exporting the Joplin
 database. In the compose stack this points at the same PostgreSQL service but a
@@ -127,6 +128,13 @@ If a database is recreated, run the Joplin admin repair script documented in
 | `GCS_PROJECT_ID` | GCP project for storage clients. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Service-account JSON path when using GCS. |
 | `BACKUP_DIR` | Optional local output directory for `scripts/backup_kb.py`. |
+
+## Frontend
+
+| Variable | Purpose |
+|----------|---------|
+| `NEXT_PUBLIC_AGENT_URL` | Public agent API URL used by the browser (must be reachable from the user's device). |
+| `AGENT_INTERNAL_URL` | Internal agent API URL used by Next.js SSR inside Docker (container-to-container). Defaults to `http://pi_agent_backend:8000` when running in compose. |
 
 Object storage is for backup artifacts and generated outputs. Do not mount GCS
 or S3 as a live PostgreSQL data directory.

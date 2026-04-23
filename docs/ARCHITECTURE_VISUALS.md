@@ -4,13 +4,19 @@ This document describes the main runtime paths in `parsnip-ai`: user requests, r
 
 ## 1. Runtime Request Path
 
-A chat request enters through OpenWebUI, passes through the pipeline adapter, and is handled by the Agent API. The agent decides whether to answer from memory, retrieve from the knowledge base, call external tools, execute analysis code, or publish a result to Joplin.
+A chat request enters through the **assistant-ui** frontend (Next.js/React) using
+`/v1/chat/completions`, is handled by the Agent API. The agent decides whether to answer from memory, retrieve from the knowledge base, call external tools, execute analysis code, or publish a result to Joplin.
+
+`OpenWebUI` and its pipeline adapter remain available for backward compatibility.
 
 ```mermaid
 flowchart LR
-    User[User browser] --> OWUI[OpenWebUI<br/>:3000]
-    OWUI --> Pipe[Pipelines adapter<br/>:9099]
-    Pipe --> Agent[Agent API<br/>FastAPI :8000]
+    User[User browser] --> FE[Frontend<br/>assistant-ui :3001]
+    FE -->|/v1/chat/completions| Agent[Agent API<br/>FastAPI :8000]
+
+    User -.->|legacy| OWUI[OpenWebUI<br/>:3000]
+    OWUI -.->|legacy| Pipe[Pipelines adapter<br/>:9099]
+    Pipe -.->|legacy| Agent
 
     subgraph AgentCore[Agent runtime]
         Agent --> Graph[LangGraph orchestration]
@@ -22,18 +28,20 @@ flowchart LR
     subgraph Tooling[Tool targets]
         Tools --> KB[Hybrid KB retrieval]
         Tools --> Analysis[Analysis server<br/>Python, R, notebooks]
-        Tools --> Joplin[Joplin MCP<br/>notes and resources]
+        Tools --> JoplinPG[Joplin PG direct<br/>joplin_pg.py]
         Tools --> Search[SearXNG / web extraction]
         Tools --> GitHub[GitHub tools]
     end
 
-    Checkpoints --> PG[(PostgreSQL)]
+    JoplinPG -.->|deprecated| JMCP[Joplin MCP<br/>:8090]
+    JoplinPG --> PG[(PostgreSQL + joplin DB)]
+
+    Checkpoints --> PG
     Memory --> PG
     KB --> PG
-    Joplin --> JoplinServer[Joplin Server]
 ```
 
-Key boundary: OpenWebUI is the user interface, but the Agent API owns orchestration, memory, retrieval, and tool execution.
+Key boundary: The **frontend** (assistant-ui) owns the browser experience, but the Agent API owns orchestration, memory, retrieval, and tool execution. The Joplin MCP HTTP bridge is deprecated; the agent connects directly via the `joplin` connection pool.
 
 ## 2. Durable Storage Layout
 

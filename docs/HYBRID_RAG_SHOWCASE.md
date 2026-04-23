@@ -82,4 +82,5 @@ Responses should keep evidence traceable:
 - `agent/tools/kb_search.py`
 - `agent/tools/compare_sources.py`
 - `agent/tools/timeline.py`
-- `agent/tools/joplin.py`
+- `agent/tools/joplin_pg.py`
+- `agent/tools/joplin_hitl.py` (human-in-the-loop)

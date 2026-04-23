@@ -26,12 +26,12 @@ Available tags: `latest`, `0.1.0`, `0.1`, `0`, plus short-SHA.
 > services support both `amd64` and `arm64`.
 
 Verify:
-- OpenWebUI: `http://localhost:3000`
+- Frontend (assistant-ui): `http://localhost:3001`
+- OpenWebUI: `http://localhost:3000` (legacy)
 - Agent: `http://localhost:8000/health`
-- Pipelines: `http://localhost:9099/`
+- Pipelines: `http://localhost:9099/` (legacy)
 - Analysis server: `http://localhost:8095/health`
 - Joplin Server: `http://localhost:22300`
-- Joplin MCP: `http://localhost:8090`
 - SearXNG: `http://localhost:8080`
 
 ## Production Guidance
@@ -40,7 +40,7 @@ Verify:
 
 1. Provision VM (Docker-capable) and managed PostgreSQL (or self-host Postgres).
 2. Configure environment variables and secret manager integration.
-3. Set ingress/reverse proxy with TLS for `3000/8000/9099`.
+3. Set ingress/reverse proxy with TLS for `3001/8000`.
 4. Configure object storage credentials if using external artifact storage.
 5. Run compose stack and health checks.
 6. Add uptime monitoring + log aggregation.
