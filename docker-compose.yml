@@ -108,7 +108,7 @@ services:
       LLM_PROVIDER: ${LLM_PROVIDER:-openrouter}
       OPENAI_COMPAT_BASE_URL: ${OPENAI_COMPAT_BASE_URL:-}
       OPENAI_COMPAT_API_KEY: ${OPENAI_COMPAT_API_KEY:-}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://localhost:11434}
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       OLLAMA_CLOUD_URL: ${OLLAMA_CLOUD_URL:-https://ollama.com/v1}
       EMBED_MODEL: ${EMBED_MODEL:-mxbai-embed-large}
@@ -240,7 +240,7 @@ services:
     environment:
       DATABASE_URL: postgresql://agent:${POSTGRES_PASSWORD}@pi_agent_postgres:5432/agent_kb
       JOPLIN_DATABASE_URL: postgresql://agent:${POSTGRES_PASSWORD}@pi_agent_postgres:5432/joplin
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://localhost:11434}
       EMBED_MODEL: ${EMBED_MODEL:-mxbai-embed-large}
       NEWS_API_KEY: ${NEWS_API_KEY}
       JOPLIN_SERVER_URL: ${JOPLIN_SERVER_URL:-http://pi_agent_joplin:22300}
@@ -272,7 +272,7 @@ services:
     environment:
       OPENAI_API_BASE_URL: http://pi_agent_pipelines:9099
       OPENAI_API_KEY: owui-pipeline-key
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://localhost:11434}
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY}
       ENABLE_COMMUNITY_SHARING: "false"
       PORT: "3000"
