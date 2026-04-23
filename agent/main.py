@@ -4,6 +4,8 @@ FastAPI entry point for the pi-agent LangGraph research agent.
 Endpoints:
   POST /chat          — streaming SSE chat
   POST /chat/sync     — non-streaming (for testing)
+  POST /v1/chat/completions — OpenAI-compatible streaming chat (for assistant-ui)
+  GET  /v1/models          — OpenAI-compatible model list
   GET  /health        — liveness probe
   GET  /threads/{id}  — fetch thread message history
   GET  /stats         — knowledge base stats
@@ -18,6 +20,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 import uuid
 from contextlib import asynccontextmanager
 
@@ -29,6 +32,7 @@ from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from pydantic import BaseModel
 
+from tools.db_pool import init_pool, close_all
 from tools.pdf_ingest import ingest_pdf
 
 from config import get_settings
@@ -49,8 +53,15 @@ async def lifespan(app: FastAPI):
     agent = await build_graph(settings.database_url)
     _pool = getattr(agent, "_db_pool", None)
     logger.info("Agent ready.")
+
+    # Named connection pool registry (agent_kb for tools, joplin in Task 6)
+    await init_pool("agent_kb", settings.database_url)
+    logger.info("Named pool 'agent_kb' initialised.")
+
     yield
+
     logger.info("Shutting down.")
+    await close_all()
     pool = _pool
     if pool:
         try:
@@ -83,6 +94,19 @@ class ChatResponse(BaseModel):
     thread_id: str
     content: str
     model_id: str = ""
+
+
+class OpenAIChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class OpenAIChatRequest(BaseModel):
+    model: str = "parsnip-agent"
+    messages: list[OpenAIChatMessage]
+    stream: bool = True
+    temperature: float | None = None
+    max_tokens: int | None = None
 
 
 class SessionSave(BaseModel):
@@ -166,6 +190,185 @@ async def chat_stream(req: ChatRequest):
         media_type="text/event-stream",
         headers={
             "X-Thread-ID": thread_id,
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ── OpenAI-compatible endpoints (for assistant-ui / Vercel AI SDK) ─────────
+
+
+@app.get("/v1/models")
+async def openai_list_models():
+    """OpenAI-compatible /v1/models endpoint."""
+    return {
+        "object": "list",
+        "data": [
+            {
+                "id": "parsnip-agent",
+                "object": "model",
+                "owned_by": "parsnip",
+            }
+        ],
+    }
+
+
+@app.post("/v1/chat/completions")
+async def openai_chat_completions(req: OpenAIChatRequest):
+    """OpenAI-compatible /v1/chat/completions endpoint.
+
+    Converts internal SSE events to OpenAI streaming format so that
+    Vercel AI SDK's `useChat` hook can consume them directly.
+    """
+    # Extract the last user message
+    user_message = ""
+    for msg in reversed(req.messages):
+        if msg.role == "user":
+            user_message = msg.content
+            break
+
+    if not user_message:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"message": "No user message found in messages array", "type": "invalid_request_error"}},
+        )
+
+    thread_id = str(uuid.uuid4())
+    config = {"configurable": {"thread_id": thread_id}}
+    chatcmpl_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
+
+    settings = get_settings()
+    memory_ctx = await _load_l1_memory(thread_id, settings.database_url)
+
+    # Restore conversation history from checkpointer
+    existing_state = await agent.aget_state(config)
+    existing_messages = (
+        list(existing_state.values.get("messages", []))
+        if existing_state and existing_state.values
+        else []
+    )
+
+    # Convert OpenAI messages to LangChain messages for context
+    history_messages = list(existing_messages)
+    for msg in req.messages[:-1]:  # All except the last (which is the current user message)
+        if msg.role == "user":
+            history_messages.append(HumanMessage(content=msg.content))
+        elif msg.role == "assistant":
+            history_messages.append(AIMessage(content=msg.content))
+
+    history_messages.append(HumanMessage(content=user_message))
+
+    state = {
+        "messages": history_messages,
+        "model_override": None,
+        "memory_context": memory_ctx,
+    }
+
+    async def openai_event_stream():
+        tool_call_index = 0
+        resolved_model = "parsnip-agent"
+
+        try:
+            async for event in agent.astream_events(
+                state, config={**config, "recursion_limit": 50}, version="v2"
+            ):
+                kind = event["event"]
+
+                if kind == "on_chat_model_stream":
+                    chunk = event["data"].get("chunk")
+                    if chunk and chunk.content:
+                        openai_chunk = {
+                            "id": chatcmpl_id,
+                            "object": "chat.completion.chunk",
+                            "created": int(time.time()),
+                            "model": resolved_model,
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "delta": {"role": "assistant", "content": chunk.content},
+                                    "finish_reason": None,
+                                }
+                            ],
+                        }
+                        yield f"data: {json.dumps(openai_chunk)}\n\n"
+
+                elif kind == "on_tool_start":
+                    tool_name = event.get("name", "")
+                    tool_input = event["data"].get("input", {})
+                    openai_chunk = {
+                        "id": chatcmpl_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": resolved_model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "role": "assistant",
+                                    "tool_calls": [
+                                        {
+                                            "index": tool_call_index,
+                                            "id": f"call_{uuid.uuid4().hex[:24]}",
+                                            "type": "function",
+                                            "function": {
+                                                "name": tool_name,
+                                                "arguments": json.dumps(tool_input) if isinstance(tool_input, dict) else str(tool_input),
+                                            },
+                                        }
+                                    ],
+                                },
+                                "finish_reason": None,
+                            }
+                        ],
+                    }
+                    tool_call_index += 1
+                    yield f"data: {json.dumps(openai_chunk)}\n\n"
+
+                elif kind == "on_tool_end":
+                    # Tool end event — no content to add in OpenAI format
+                    pass
+
+        except Exception as e:
+            logger.exception("OpenAI compat stream error")
+            error_chunk = {
+                "id": chatcmpl_id,
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": resolved_model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"content": f"\n[Error: {str(e)}]"},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+            yield f"data: {json.dumps(error_chunk)}\n\n"
+        finally:
+            resolved_model = settings.resolve_model(settings.default_llm)
+            # Send final chunk with finish_reason
+            final_chunk = {
+                "id": chatcmpl_id,
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": resolved_model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {},
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+            yield f"data: {json.dumps(final_chunk)}\n\n"
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        openai_event_stream(),
+        media_type="text/event-stream",
+        headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
         },
