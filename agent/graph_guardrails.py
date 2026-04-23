@@ -1,9 +1,12 @@
 """Agent guardrails: circuit breaker, cascade fallback, and message pruning."""
 
+import fcntl
 import json
 import logging
-import threading
+import os
+import tempfile
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
@@ -17,45 +20,113 @@ logger = logging.getLogger(__name__)
 # When OpenRouter returns 403 (key limit), 429 (rate limit), or 402 (payment),
 # we rotate to the next model in the alias fallback chain.
 # NOTE: GPU Ollama is reserved for embeddings ONLY — not used for agentic tasks.
+#
+# State is stored in a JSON file so it is shared across worker processes.
+# Writes use temp-file + os.rename for atomicity; reads use fcntl.flock for
+# safety during concurrent access.
 
-_OPENROUTER_TRIPPED = False
-_OPENROUTER_TRIPPED_AT: float | None = None
-_OPENROUTER_LOCK = threading.Lock()
+_CIRCUIT_BREAKER_PATH = os.environ.get(
+    "PARSNIP_CIRCUIT_BREAKER_PATH", "/tmp/parsnip_circuit_breaker.json"
+)
 _OPENROUTER_COOLDOWN_SECONDS = 300  # 5 minutes
 
 
-def _trip_circuit():
-    global _OPENROUTER_TRIPPED, _OPENROUTER_TRIPPED_AT
-    with _OPENROUTER_LOCK:
-        _OPENROUTER_TRIPPED = True
-        _OPENROUTER_TRIPPED_AT = time.time()
+def _cleanup_stale_temp_files() -> None:
+    """Remove leftover .tmp files from prior crashed atomic writes."""
+    state_dir = Path(_CIRCUIT_BREAKER_PATH).parent
+    try:
+        for entry in state_dir.iterdir():
+            name = entry.name
+            base = Path(_CIRCUIT_BREAKER_PATH).name
+            if name.startswith(base) and ".tmp." in name:
+                try:
+                    entry.unlink()
+                    logger.debug(f"Cleaned stale temp file: {entry}")
+                except OSError:
+                    pass
+    except OSError:
+        pass
+
+
+def _trip_circuit() -> None:
+    """Atomically write circuit-breaker state to disk (tripped=True)."""
+    _cleanup_stale_temp_files()
+    payload = json.dumps({"tripped": True, "tripped_at": time.time()})
+    state_path = Path(_CIRCUIT_BREAKER_PATH)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Atomic write: write to temp file in same directory, then rename
+    fd, tmp_path = tempfile.mkstemp(
+        suffix=".tmp", prefix=state_path.name + ".", dir=state_path.parent
+    )
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(payload)
+            f.flush()
+            os.fsync(f.fileno())
+        os.rename(tmp_path, _CIRCUIT_BREAKER_PATH)
+    except BaseException:
+        # Clean up temp file on any failure
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
     logger.warning("OpenRouter circuit breaker TRIPPED — rotating to fallback model")
 
 
-def _reset_circuit():
-    global _OPENROUTER_TRIPPED, _OPENROUTER_TRIPPED_AT
-    with _OPENROUTER_LOCK:
-        _OPENROUTER_TRIPPED = False
-        _OPENROUTER_TRIPPED_AT = None
+def _reset_circuit() -> None:
+    """Delete the circuit-breaker state file to reset the circuit."""
+    try:
+        os.unlink(_CIRCUIT_BREAKER_PATH)
+    except FileNotFoundError:
+        pass
     logger.info("OpenRouter circuit breaker RESET")
 
 
 def _circuit_is_open() -> bool:
-    """Check if circuit is tripped and cooldown has not expired."""
-    global _OPENROUTER_TRIPPED, _OPENROUTER_TRIPPED_AT
-    with _OPENROUTER_LOCK:
-        if not _OPENROUTER_TRIPPED:
-            return False
-        if _OPENROUTER_TRIPPED_AT is None:
-            return False
-        elapsed = time.time() - _OPENROUTER_TRIPPED_AT
-        if elapsed >= _OPENROUTER_COOLDOWN_SECONDS:
-            # Auto-reset after cooldown
-            _OPENROUTER_TRIPPED = False
-            _OPENROUTER_TRIPPED_AT = None
-            logger.info("OpenRouter circuit breaker auto-RESET after cooldown")
-            return False
-        return True
+    """Check if circuit is tripped and cooldown has not expired.
+
+    Reads the state file under a shared lock.  If the cooldown has elapsed,
+    auto-resets the circuit by deleting the file.
+    """
+    _cleanup_stale_temp_files()
+
+    state_path = Path(_CIRCUIT_BREAKER_PATH)
+    if not state_path.exists():
+        return False
+
+    try:
+        with open(_CIRCUIT_BREAKER_PATH, "r") as f:
+            fcntl.flock(f, fcntl.LOCK_SH)
+            try:
+                raw = f.read()
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
+        data = json.loads(raw)
+    except (json.JSONDecodeError, OSError, ValueError):
+        # Corrupt or unreadable file — treat as closed and clean up
+        try:
+            os.unlink(_CIRCUIT_BREAKER_PATH)
+        except OSError:
+            pass
+        return False
+
+    if not data.get("tripped"):
+        return False
+
+    tripped_at = data.get("tripped_at")
+    if tripped_at is None:
+        return False
+
+    elapsed = time.time() - tripped_at
+    if elapsed >= _OPENROUTER_COOLDOWN_SECONDS:
+        # Auto-reset after cooldown
+        _reset_circuit()
+        logger.info("OpenRouter circuit breaker auto-RESET after cooldown")
+        return False
+
+    return True
 
 
 def _is_rate_limit_error(e: Exception) -> bool:
