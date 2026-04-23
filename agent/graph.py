@@ -70,7 +70,7 @@ async def build_graph(db_url: str):
     from psycopg.rows import dict_row
 
     from graph_nodes import make_agent_node, make_dynamic_llm_node
-    from tools import TOOLS
+    from graph_tools import TOOLS
 
     logger = logging.getLogger(__name__)
 

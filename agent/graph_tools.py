@@ -1,5 +1,8 @@
 """Tool pack definitions and dynamic tool selection for the agent."""
 
+# Import utility used at module level before tool-list concatenation
+from graph_state import _dedupe_tools
+
 from tools import (
     adaptive_search,
     holistic_search,
@@ -169,6 +172,11 @@ TOOL_PACKS = {
     "system": [system_status],
 }
 
+TOOLS = _dedupe_tools(
+    CORE_TOOLS + RESEARCH_TOOLS + ANALYSIS_TOOLS + WORKSPACE_TOOLS
+    + GITHUB_TOOLS + NOTE_TOOLS + MEMORY_TOOLS
+)
+
 # ── Guardrail constants ─────────────────────────────────────────────────────
 
 TOOL_CALL_BUDGETS = {
@@ -201,7 +209,6 @@ ANALYSIS_TOOL_NAMES = {
 # ── Tool selection logic ────────────────────────────────────────────────────
 
 from graph_state import (
-    _dedupe_tools,
     _task_intents_from_messages,
     _task_tier_from_messages,
 )

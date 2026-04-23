@@ -1,5 +1,9 @@
 """
-joplin_mcp — Tools for interacting with Joplin Server via the MCP server.
+joplin_mcp — DEPRECATED: Use joplin_pg for direct PostgreSQL access instead.
+
+This module provides tools for interacting with Joplin Server via the MCP
+HTTP proxy (using httpx). It is retained for backward compatibility only
+and will be removed in a future release.
 
 Provides: create_notebook, create_note, update_note, edit_note, delete_note,
 get_note, search_notes, list_notebooks, list_tags, get_tags_for_note,
@@ -7,6 +11,15 @@ upload_resource, ping.
 
 The MCP server exposes a REST proxy at POST /tools/{tool_name} for direct tool calls.
 """
+
+import warnings
+
+warnings.warn(
+    "joplin_mcp is deprecated — use joplin_pg for direct PG access. "
+    "This module will be removed in a future release.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 import os
 import json
