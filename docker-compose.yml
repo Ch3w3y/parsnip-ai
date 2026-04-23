@@ -273,6 +273,9 @@ services:
     container_name: pi_agent_frontend
     restart: unless-stopped
     network_mode: host
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     environment:
       - NEXT_PUBLIC_AGENT_URL=http://localhost:8000
     depends_on:
