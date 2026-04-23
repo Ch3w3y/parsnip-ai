@@ -1,7 +1,5 @@
-import os
-import psycopg
-from psycopg import sql
 from langchain_core.tools import tool
+from .db_pool import get_pool
 
 
 CATEGORIES = ["user_prefs", "facts", "decisions", "project_context", "people"]
@@ -28,10 +26,9 @@ async def save_memory(
         )
 
     importance = max(1, min(5, int(importance)))
-    db_url = os.environ["DATABASE_URL"]
 
     try:
-        async with await psycopg.AsyncConnection.connect(db_url) as conn:
+        async with get_pool("agent_kb").connection() as conn:
             await conn.execute(
                 """
                 INSERT INTO agent_memories (category, content, importance)
@@ -62,7 +59,6 @@ async def recall_memory(
         limit: Max results (default 10)
     """
     limit = min(int(limit), 50)
-    db_url = os.environ["DATABASE_URL"]
 
     conditions = ["deleted_at IS NULL"]
     params: list = []
@@ -91,7 +87,7 @@ async def recall_memory(
     """
 
     try:
-        async with await psycopg.AsyncConnection.connect(db_url) as conn:
+        async with get_pool("agent_kb").connection() as conn:
             rows = await (await conn.execute(q, params)).fetchall()
     except Exception as e:
         return f"[Memory recall failed: {e}]"
@@ -121,7 +117,6 @@ async def update_memory(
         content: New content (optional — leave unchanged if not provided)
         importance: New importance 1-5 (optional)
     """
-    db_url = os.environ["DATABASE_URL"]
     updates = []
     params: list = []
 
@@ -137,7 +132,7 @@ async def update_memory(
     q = f"UPDATE agent_memories SET {', '.join(updates)} WHERE id = %s AND deleted_at IS NULL"
 
     try:
-        async with await psycopg.AsyncConnection.connect(db_url) as conn:
+        async with get_pool("agent_kb").connection() as conn:
             result = await conn.execute(q, params)
             await conn.commit()
             if result.rowcount == 0:
@@ -155,10 +150,8 @@ async def delete_memory(memory_id: int) -> str:
     Args:
         memory_id: The ID of the memory to delete (from recall_memory results)
     """
-    db_url = os.environ["DATABASE_URL"]
-
     try:
-        async with await psycopg.AsyncConnection.connect(db_url) as conn:
+        async with get_pool("agent_kb").connection() as conn:
             result = await conn.execute(
                 "UPDATE agent_memories SET deleted_at = NOW() WHERE id = %s AND deleted_at IS NULL",
                 (memory_id,),
@@ -188,10 +181,9 @@ async def recall_memory_by_category(category: str, limit: int = 20) -> str:
         return f"[Invalid category '{category}'. Must be one of: {', '.join(CATEGORIES)}]"
 
     limit = min(int(limit), 100)
-    db_url = os.environ["DATABASE_URL"]
 
     try:
-        async with await psycopg.AsyncConnection.connect(db_url) as conn:
+        async with get_pool("agent_kb").connection() as conn:
             rows = await (await conn.execute(
                 """
                 SELECT id, content, importance, created_at
@@ -233,7 +225,6 @@ async def summarize_memories(category: str = "", max_insights: int = 10) -> str:
                   'decisions', 'project_context', 'people'). Leave empty for all.
         max_insights: Maximum number of key insights to return (default 10)
     """
-    db_url = os.environ["DATABASE_URL"]
     max_insights = min(int(max_insights), 30)
 
     conditions = ["deleted_at IS NULL"]
@@ -248,7 +239,7 @@ async def summarize_memories(category: str = "", max_insights: int = 10) -> str:
     params.append(50)
 
     try:
-        async with await psycopg.AsyncConnection.connect(db_url) as conn:
+        async with get_pool("agent_kb").connection() as conn:
             rows = await (await conn.execute(
                 f"""
                 SELECT id, category, content, importance, created_at
