@@ -22,7 +22,6 @@ from pydantic import BaseModel
 class Pipeline:
     class Valves(BaseModel):
         AGENT_URL: str = "http://localhost:8000"
-        JOPLIN_MCP_URL: str = "http://localhost:8090"
         SHOW_TOOL_CALLS: bool = True
         SHOW_TOOL_OUTPUTS: bool = False
         REQUEST_TIMEOUT: int = 600
@@ -33,48 +32,9 @@ class Pipeline:
         self.name = "Research Agent"
         self.valves = self.Valves(
             AGENT_URL=os.environ.get("AGENT_URL", "http://localhost:8000"),
-            JOPLIN_MCP_URL=os.environ.get("JOPLIN_MCP_URL", "http://localhost:8090"),
         )
         self._last_thread_id = None
         self._tools_used = []
-
-    def _fetch_joplin_note(self, note_id: str) -> str | None:
-        """Fetch note content from Joplin MCP bridge."""
-        try:
-            r = requests.post(
-                f"{self.valves.JOPLIN_MCP_URL}/tools/joplin_get_note",
-                json={"tool": "joplin_get_note", "arguments": {"note_id": note_id}},
-                timeout=10,
-            )
-            r.raise_for_status()
-            data = r.json()
-            result = data.get("result", "")
-            # Parse markdown title/content from MCP response
-            if "##" in result:
-                lines = result.split("\n")
-                content_lines = []
-                for line in lines:
-                    if line.startswith("## "):
-                        continue
-                    if line.startswith("`") and line.endswith("`"):
-                        continue
-                    content_lines.append(line)
-                return "\n".join(content_lines).strip()
-            return result
-        except Exception:
-            return None
-
-    def _enrich_with_joplin(self, content: str) -> str:
-        """If response contains a joplin:// link, fetch and prepend note content."""
-        import re
-        match = re.search(r"joplin://x-callback-url/openNote\?id=([a-f0-9]+)", content)
-        if not match:
-            return content
-        note_id = match.group(1)
-        note_content = self._fetch_joplin_note(note_id)
-        if note_content:
-            return f"{note_content}\n\n---\n\n*{content}*"
-        return content
 
     def _stream_response(
         self,
@@ -157,16 +117,6 @@ class Pipeline:
                             yield hud
                         break
 
-            # Post-stream: enrich with Joplin content if a deep-link was generated
-            full_text = "".join(accumulated)
-            # Fetch note content directly (don't re-yield the already-streamed text)
-            import re
-            match = re.search(r"joplin://x-callback-url/openNote\?id=([a-f0-9]+)", full_text)
-            if match:
-                note_content = self._fetch_joplin_note(match.group(1))
-                if note_content:
-                    yield f"\n\n---\n\n**Note content:**\n\n{note_content}"
-
             if self.valves.AUTO_SAVE_SESSIONS and self._tools_used:
                 try:
                     requests.post(
@@ -216,9 +166,6 @@ class Pipeline:
             content = data.get("content", "")
             content = content if isinstance(content, str) else str(content)
             model_id = data.get("model_id", "")
-            
-            # Enrich with Joplin note content if a deep-link is present
-            content = self._enrich_with_joplin(content)
             
             if model_id:
                 hud = f"\n\n---\n\n<small>🤖 **Model:** {model_id}</small>"
