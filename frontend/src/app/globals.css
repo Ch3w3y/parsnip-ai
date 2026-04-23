@@ -1,0 +1,152 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Brand palette — from parsnip-ai logo SVG */
+  --parsnip-navy: #0b0f1a;
+  --parsnip-navy-800: #111827;
+  --parsnip-navy-700: #1a2332;
+  --parsnip-navy-600: #243044;
+  --parsnip-border: #2d3b4f;
+  --parsnip-text: #f5f7ff;
+  --parsnip-muted: #9fb3c8;
+  --parsnip-teal: #23c0a8;
+  --parsnip-blue: #2f6cff;
+
+  /* Semantic aliases for assistant-ui overrides */
+  --aui-bg-primary: var(--parsnip-navy);
+  --aui-bg-secondary: var(--parsnip-navy-800);
+  --aui-bg-surface: var(--parsnip-navy-700);
+  --aui-bg-hover: var(--parsnip-navy-600);
+  --aui-border: var(--parsnip-border);
+  --aui-text-primary: var(--parsnip-text);
+  --aui-text-secondary: var(--parsnip-muted);
+  --aui-accent-teal: var(--parsnip-teal);
+  --aui-accent-blue: var(--parsnip-blue);
+  --aui-success: var(--parsnip-teal);
+  --aui-error: #ef4444;
+  --aui-warning: #f59e0b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--parsnip-navy);
+  color: var(--parsnip-text);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+/* ── Gradient text utility ────────────────────────────────────────────────── */
+.gradient-text {
+  background: linear-gradient(135deg, var(--parsnip-teal), var(--parsnip-blue));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Accent line ─────────────────────────────────────────────────────────── */
+.accent-line {
+  background: linear-gradient(90deg, var(--parsnip-teal), var(--parsnip-blue));
+  height: 2px;
+}
+
+/* ── assistant-ui overrides ──────────────────────────────────────────────── */
+.aui-root {
+  --aui-bg-primary: #0b0f1a;
+  --aui-bg-secondary: #111827;
+  --aui-bg-surface: #1a2332;
+  --aui-border: #2d3b4f;
+}
+
+/* Thread background */
+[class*="aui-thread"] {
+  background-color: var(--parsnip-navy) !important;
+}
+
+/* Message bubbles */
+[class*="aui-message"] {
+  font-family: inherit;
+}
+
+/* Composer / input area */
+[class*="aui-composer"] {
+  background-color: var(--parsnip-navy-800) !important;
+  border-color: var(--parsnip-border) !important;
+}
+
+/* Scrollbar theming */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--parsnip-navy);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--parsnip-navy-600);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--parsnip-border);
+}
+
+/* ── Shimmer loading animation ──────────────────────────────────────────── */
+@keyframes shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--parsnip-navy-700) 25%,
+    var(--parsnip-navy-600) 50%,
+    var(--parsnip-navy-700) 75%
+  );
+  background-size: 800px 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* ── Pulsing dot ─────────────────────────────────────────────────────────── */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+/* ── Code block styling ──────────────────────────────────────────────────── */
+.code-block {
+  background-color: var(--parsnip-navy);
+  border: 1px solid var(--parsnip-border);
+  border-radius: 8px;
+  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-x: auto;
+  padding: 12px 16px;
+}
+
+/* ── Tool card base ──────────────────────────────────────────────────────── */
+.tool-card {
+  background-color: var(--parsnip-navy-700);
+  border: 1px solid var(--parsnip-border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin: 6px 0;
+  transition: border-color 0.2s;
+}
+.tool-card:hover {
+  border-color: var(--parsnip-teal);
+}
+
+/* ── Countdown ring ──────────────────────────────────────────────────────── */
+.countdown-ring {
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+}
