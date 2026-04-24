@@ -22,18 +22,6 @@ from tools import (
     delete_memory,
     recall_memory_by_category,
     summarize_memories,
-    joplin_create_notebook,
-    joplin_create_note,
-    joplin_update_note,
-    joplin_edit_note,
-    joplin_delete_note,
-    joplin_get_note,
-    joplin_search_notes,
-    joplin_list_notebooks,
-    joplin_list_tags,
-    joplin_get_tags_for_note,
-    joplin_upload_resource,
-    joplin_ping,
     github_search_repos,
     github_get_file,
     github_list_commits,
@@ -64,10 +52,32 @@ from tools import (
     write_and_execute_script,
     execute_workspace_script,
     ingest_pdf,
-    save_note,
-    list_documents,
     system_status,
     search_with_filters,
+)
+
+from tools.notes_pg import (
+    joplin_create_notebook,
+    joplin_create_note,
+    joplin_update_note,
+    joplin_edit_note,
+    joplin_delete_note,
+    joplin_get_note,
+    joplin_search_notes,
+    joplin_list_notebooks,
+    joplin_list_tags,
+    joplin_get_tags_for_note,
+    joplin_upload_resource,
+    joplin_ping,
+    save_note,
+    list_documents,
+)
+
+from tools.hitl import (
+    generate_note,
+    detect_edits,
+    review_edited_note,
+    publish_review,
 )
 
 # ── Tool lists ──────────────────────────────────────────────────────────────
@@ -150,6 +160,10 @@ NOTE_TOOLS = [
     joplin_ping,
     save_note,
     list_documents,
+    generate_note,
+    detect_edits,
+    review_edited_note,
+    publish_review,
 ]
 
 MEMORY_TOOLS = [

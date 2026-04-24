@@ -1,17 +1,8 @@
 "use client";
 
-/**
- * Tool UI registry — maps Parsnip agent tool names to React components.
- *
- * Each component is built with makeAssistantToolUI from @assistant-ui/react.
- * Tool names sharing the same visual style reuse a shared render function.
- *
- * In 0.12.x, makeAssistantToolUI returns React components that must be rendered
- * inside the AssistantRuntimeProvider tree.
- */
-
 import { makeAssistantToolUI } from "@assistant-ui/react";
 import { ApprovalUI } from "../ApprovalUI";
+import { AnalysisOutput } from "../AnalysisOutput";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -21,7 +12,7 @@ interface ToolArgs {
 
 // ── Shared render functions ────────────────────────────────────────────────
 
-function renderSearchTool({ args, status, result }: { args: ToolArgs; status: { type: string }; result: unknown }) {
+function renderSearchTool({ args, status, result }: { args: ToolArgs; status: { type: string }; result?: unknown }) {
   const query = (args.query as string) || (args.question as string) || "";
   const toolName = (args._tool as string) || "Search";
 
@@ -60,7 +51,7 @@ function renderSearchTool({ args, status, result }: { args: ToolArgs; status: { 
   );
 }
 
-function renderJoplinTool({ args, status, result }: { args: ToolArgs; status: { type: string }; result: unknown }) {
+function renderJoplinTool({ args, status, result }: { args: ToolArgs; status: { type: string }; result?: unknown }) {
   const action = (args._tool as string) || "Joplin";
 
   if (status.type === "running") {
@@ -102,7 +93,7 @@ function renderJoplinTool({ args, status, result }: { args: ToolArgs; status: { 
   );
 }
 
-function renderMemoryTool({ args, status, result }: { args: ToolArgs; status: { type: string }; result: unknown }) {
+function renderMemoryTool({ args, status, result }: { args: ToolArgs; status: { type: string }; result?: unknown }) {
   const action = (args._tool as string) || "Memory";
   const category = (args.category as string) || "";
   const importance = args.importance as number | undefined;
@@ -145,7 +136,7 @@ function renderMemoryTool({ args, status, result }: { args: ToolArgs; status: { 
   );
 }
 
-function renderAnalysisTool({ args, status, result }: { args: ToolArgs; status: { type: string }; result: unknown }) {
+function renderAnalysisTool({ args, status, result }: { args: ToolArgs; status: { type: string }; result?: unknown }) {
   const action = (args._tool as string) || "Analysis";
   const code = (args.code as string) || (args.script as string) || "";
 
@@ -170,6 +161,11 @@ function renderAnalysisTool({ args, status, result }: { args: ToolArgs; status: 
       </div>
     );
   }
+
+  const resultStr = typeof result === "string" ? result : JSON.stringify(result, null, 2);
+  const outputUrlPattern = /(?:\/outputs\/[^\s"')\]]+|output\/[^\s"')\]]+\.(?:png|svg|pdf|html|csv|json|ipynb))/gi;
+  const outputUrls = resultStr.match(outputUrlPattern) || [];
+
   return (
     <div className="tool-card">
       <div className="flex items-center gap-2 mb-2">
@@ -182,14 +178,19 @@ function renderAnalysisTool({ args, status, result }: { args: ToolArgs; status: 
           <div className="code-block mt-1 text-xs max-h-48 overflow-auto">{code.slice(0, 2000)}</div>
         </details>
       )}
-      <div className="code-block text-sm whitespace-pre-wrap">
-        {typeof result === "string" ? result.slice(0, 1500) : JSON.stringify(result, null, 2)?.slice(0, 500)}
-      </div>
+      {outputUrls.map((url, i) => (
+        <AnalysisOutput key={i} url={url} alt={`Output ${i + 1}`} />
+      ))}
+      {outputUrls.length === 0 && (
+        <div className="code-block text-sm whitespace-pre-wrap">
+          {typeof result === "string" ? result.slice(0, 1500) : (resultStr?.slice(0, 500))}
+        </div>
+      )}
     </div>
   );
 }
 
-function renderWorkspaceTool({ args, status, result }: { args: ToolArgs; status: { type: string }; result: unknown }) {
+function renderWorkspaceTool({ args, status, result }: { args: ToolArgs; status: { type: string }; result?: unknown }) {
   const action = (args._tool as string) || "Workspace";
   const isTerminal = action.includes("bash") || action.includes("execute_script");
 
@@ -227,7 +228,7 @@ function renderWorkspaceTool({ args, status, result }: { args: ToolArgs; status:
   );
 }
 
-function renderGitHubTool({ args, status, result }: { args: ToolArgs; status: { type: string }; result: unknown }) {
+function renderGitHubTool({ args, status, result }: { args: ToolArgs; status: { type: string }; result?: unknown }) {
   const action = (args._tool as string) || "GitHub";
   const ghIcon = (
     <svg className="w-4 h-4 text-purple-400" viewBox="0 0 16 16" fill="currentColor">
@@ -265,7 +266,7 @@ function renderGitHubTool({ args, status, result }: { args: ToolArgs; status: { 
   );
 }
 
-function renderGenericTool({ args, status, result }: { args: ToolArgs; status: { type: string }; result: unknown }) {
+function renderGenericTool({ args, status, result }: { args: ToolArgs; status: { type: string }; result?: unknown }) {
   const action = (args._tool as string) || "Tool";
 
   if (status.type === "running") {

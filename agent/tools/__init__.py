@@ -10,26 +10,6 @@ from .knowledge_gaps import knowledge_gaps
 from .compare_sources import compare_sources
 from .find_similar import find_similar
 from .memory import save_memory, recall_memory, update_memory, delete_memory, recall_memory_by_category, summarize_memories
-from .joplin_pg import (
-    joplin_create_notebook,
-    joplin_create_note,
-    joplin_update_note,
-    joplin_edit_note,
-    joplin_delete_note,
-    joplin_get_note,
-    joplin_search_notes,
-    joplin_list_notebooks,
-    joplin_list_tags,
-    joplin_get_tags_for_note,
-    joplin_upload_resource,
-    joplin_ping,
-)
-from .joplin_hitl import (
-    generate_note,
-    detect_edits,
-    review_edited_note,
-    publish_review,
-)
 from .github import (
     github_search_repos,
     github_get_file,
@@ -66,7 +46,6 @@ from .workspace import (
     execute_workspace_script,
 )
 from .ingest import ingest_pdf
-from .notes import save_note, list_documents
 from .system import system_status
 from .filtered_search import search_with_filters
 
@@ -89,24 +68,6 @@ __all__ = [
     "delete_memory",
     "recall_memory_by_category",
     "summarize_memories",
-    # joplin_pg (direct PG access versions)
-    "joplin_create_notebook",
-    "joplin_create_note",
-    "joplin_update_note",
-    "joplin_edit_note",
-    "joplin_delete_note",
-    "joplin_get_note",
-    "joplin_search_notes",
-    "joplin_list_notebooks",
-    "joplin_list_tags",
-    "joplin_get_tags_for_note",
-    "joplin_upload_resource",
-    "joplin_ping",
-    # joplin_hitl (HITL workflow tools)
-    "generate_note",
-    "detect_edits",
-    "review_edited_note",
-    "publish_review",
     "github_search_repos",
     "github_get_file",
     "github_list_commits",
@@ -137,8 +98,6 @@ __all__ = [
     "write_and_execute_script",
     "execute_workspace_script",
     "ingest_pdf",
-    "save_note",
-    "list_documents",
     "system_status",
     "search_with_filters",
 ]

@@ -24,6 +24,7 @@ Usage::
 import logging
 from typing import Optional
 
+from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 logger = logging.getLogger(__name__)
@@ -73,11 +74,15 @@ async def init_pool(
         except Exception:
             logger.warning("Error closing existing pool '%s', continuing.", name, exc_info=True)
 
+    conn_kwargs = pool_kwargs.pop("kwargs", {})
+    conn_kwargs.setdefault("row_factory", dict_row)
+
     pool = AsyncConnectionPool(
         conninfo=dsn,
         min_size=min_size,
         max_size=max_size,
         open=False,
+        kwargs=conn_kwargs,
         **pool_kwargs,
     )
 

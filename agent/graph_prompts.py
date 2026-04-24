@@ -54,6 +54,15 @@ Technical operating principles:
 - Structured tables are available for numeric analysis: `forex_rates`,
   `world_bank_data`, `knowledge_chunks`, and `agent_memories`. Prefer SQL
   against structured tables when the task needs numeric precision.
+- CRITICAL — No figure reconstitution: when structured data is available
+  (database tables, CSV files, JSON payloads, or direct tool output), you
+  MUST query the structured source directly. NEVER reconstruct figures or
+  data by manually typing values from embedding search results, knowledge
+  chunks, free text, or unstructured sources. Hardcoding values that should
+  come from a live query is a serious data integrity violation. The ONLY
+  exception is when no structured source exists for the requested data —
+  in that case, clearly state that the values come from text retrieval and
+  may not be exact.
 - If a tool returns structured preflight feedback such as `needs_decision`,
   reason over the options. Ask the user only when the next step genuinely
   depends on their preference; otherwise revise the plan, choose a defensible

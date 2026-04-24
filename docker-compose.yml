@@ -93,6 +93,7 @@ services:
     build:
       context: ./agent
       dockerfile: Dockerfile
+      network: host
     image: ghcr.io/ch3w3y/parsnip-ai/agent:${IMAGE_TAG:-latest}
     container_name: pi_agent_backend
     restart: unless-stopped
@@ -185,6 +186,11 @@ services:
     restart: unless-stopped
     networks:
       - pi_agent_net
+    # Publish the analysis API as well as joining the Compose bridge network.
+    # This preserves host access while ensuring frontend can use the service DNS
+    # name (http://pi_agent_analysis:8095) after the container is recreated.
+    ports:
+      - "8095:8095"
     environment:
       DB_HOST: pi_agent_postgres
       DB_PORT: "5432"
@@ -199,6 +205,12 @@ services:
       - analysis_output:/app/output
       - ./gcs-key.json:/app/gcs-key.json:ro
       - ./storage:/app/storage:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8095/cache/stats || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     depends_on:
       postgres:
         condition: service_healthy
@@ -286,6 +298,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      network: host
     container_name: pi_agent_frontend
     restart: unless-stopped
     networks:
@@ -296,10 +309,12 @@ services:
     ports:
       - "3001:3000"
     environment:
-      - NEXT_PUBLIC_AGENT_URL=http://localhost:8000
       - AGENT_INTERNAL_URL=http://pi_agent_backend:8000
+      - ANALYSIS_INTERNAL_URL=http://pi_agent_analysis:8095
     depends_on:
       agent:
+        condition: service_healthy
+      analysis:
         condition: service_healthy
 
 volumes:

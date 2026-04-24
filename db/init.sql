@@ -118,3 +118,119 @@ CREATE TABLE IF NOT EXISTS world_bank_data (
 
 CREATE INDEX IF NOT EXISTS wb_data_country_indicator_idx ON world_bank_data (country_code, indicator_code);
 CREATE INDEX IF NOT EXISTS wb_data_indicator_year_idx ON world_bank_data (indicator_code, year);
+
+-- ── Joplin replacement: normalized note tables ────────────────────────────────
+-- Replaces Joplin's monolithic `items` table (separate `joplin` database)
+-- with proper normalized tables in the main agent_kb database.
+-- Key design decisions vs Joplin:
+--   • UUID PKs with gen_random_uuid() (matching Joplin's convention)
+--   • TIMESTAMPTZ instead of BIGINT millisecond timestamps
+--   • Plain TEXT markdown content instead of JSON bytea
+--   • Soft delete via deleted_at instead of Joplin's deleted_time integer
+--   • Proper foreign keys with ON DELETE CASCADE / SET NULL
+--   • GIN full-text search index on content
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- ── Notebooks (hierarchical folders) ──────────────────────────────────────────
+-- Replaces Joplin items where jop_type = 2 (notebook)
+CREATE TABLE IF NOT EXISTS notebooks (
+    id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    title       TEXT        NOT NULL,
+    parent_id   UUID        REFERENCES notebooks(id) ON DELETE SET NULL,
+    "order"     INTEGER     NOT NULL DEFAULT 0,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS notebooks_parent_id_idx ON notebooks (parent_id);
+CREATE INDEX IF NOT EXISTS notebooks_title_idx     ON notebooks (title);
+
+-- ── Notes ─────────────────────────────────────────────────────────────────────
+-- Replaces Joplin items where jop_type = 1 (note) and jop_type = 5 (todo)
+CREATE TABLE IF NOT EXISTS notes (
+    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    title           TEXT        NOT NULL,
+    content         TEXT        NOT NULL,
+    notebook_id     UUID        REFERENCES notebooks(id) ON DELETE SET NULL,
+    is_todo         BOOLEAN     NOT NULL DEFAULT FALSE,
+    todo_completed  BOOLEAN     NOT NULL DEFAULT FALSE,
+    source_url      TEXT,
+    author          TEXT,
+    deleted_at      TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS notes_notebook_id_idx  ON notes (notebook_id);
+CREATE INDEX IF NOT EXISTS notes_created_at_idx   ON notes (created_at DESC);
+CREATE INDEX IF NOT EXISTS notes_updated_at_idx   ON notes (updated_at DESC);
+CREATE INDEX IF NOT EXISTS notes_active_idx
+    ON notes (id, title, notebook_id, updated_at)
+    WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS notes_deleted_at_idx
+    ON notes (deleted_at)
+    WHERE deleted_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS notes_content_fts_idx
+    ON notes USING GIN (to_tsvector('english', content));
+
+-- ── Tags ──────────────────────────────────────────────────────────────────────
+-- Replaces Joplin items where jop_type = 17 (tag)
+CREATE TABLE IF NOT EXISTS tags (
+    id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    name        TEXT        NOT NULL UNIQUE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS tags_name_uidx ON tags (name);
+
+-- ── Note ↔ Tag junction ──────────────────────────────────────────────────────
+-- Replaces Joplin items where jop_type = 6 (note_tag link)
+CREATE TABLE IF NOT EXISTS note_tags (
+    note_id     UUID        NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    tag_id      UUID        NOT NULL REFERENCES tags(id)  ON DELETE CASCADE,
+    PRIMARY KEY (note_id, tag_id)
+);
+
+CREATE INDEX IF NOT EXISTS note_tags_tag_id_idx ON note_tags (tag_id);
+
+-- ── Note resources (attachments) ─────────────────────────────────────────────
+-- Replaces Joplin items where jop_type = 4 (resource)
+CREATE TABLE IF NOT EXISTS note_resources (
+    id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    note_id     UUID        NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    filename    TEXT        NOT NULL,
+    mime_type   TEXT,
+    content     BYTEA,
+    size        INTEGER,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS note_resources_note_id_idx ON note_resources (note_id);
+
+-- ── HITL (Human-in-the-Loop) sessions ─────────────────────────────────────────
+-- Tracks iterative LLM↔human review cycles for note content generation
+CREATE TABLE IF NOT EXISTS hitl_sessions (
+    id              SERIAL      PRIMARY KEY,
+    note_id         UUID        NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    last_llm_content TEXT       NOT NULL,
+    last_llm_hash   TEXT        NOT NULL,
+    cycle_count     INTEGER     NOT NULL DEFAULT 0,
+    status          TEXT        NOT NULL DEFAULT 'generated',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS hitl_sessions_note_id_idx ON hitl_sessions (note_id);
+CREATE INDEX IF NOT EXISTS hitl_sessions_status_idx  ON hitl_sessions (status);
+
+-- ── Thread metadata (caches titles for fast thread listing) ──────────────────
+-- Avoids slow aget_state() per thread — titles are extracted once on first load
+-- and served from this table for instant /threads responses.
+CREATE TABLE IF NOT EXISTS thread_metadata (
+    thread_id   TEXT        PRIMARY KEY,
+    title       TEXT        NOT NULL DEFAULT '',
+    message_count INTEGER   NOT NULL DEFAULT 0,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

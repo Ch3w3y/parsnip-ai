@@ -58,3 +58,9 @@ docs/future-*.md
 docs/*PLAN*.md
 docs/*plan*.md
 *.agent.md
+
+# Local OMX/OMC runtime state (keep .omc/plans tracked explicitly)
+.omx/
+.omc/project-memory.json
+.omc/sessions/
+.omc/state/

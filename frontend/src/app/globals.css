@@ -150,3 +150,226 @@ body {
   transform: rotate(-90deg);
   transform-origin: 50% 50%;
 }
+
+/* ── Markdown content styling ──────────────────────────────────────────────── */
+.markdown-content {
+  line-height: 1.6;
+  word-break: break-word;
+}
+.markdown-content .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.5em 0;
+}
+.markdown-content .katex {
+  font-size: 0.95em;
+}
+
+/* ── TipTap / ProseMirror editor styling ──────────────────────────────────── */
+.note-editor-content {
+  padding: 0.75rem;
+  min-height: 200px;
+  color: var(--parsnip-text);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.note-editor-content:focus {
+  outline: none;
+}
+
+/* Placeholder */
+.note-editor-content p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--parsnip-muted);
+  pointer-events: none;
+  height: 0;
+  font-style: italic;
+}
+
+/* Headings */
+.note-editor-content h1 {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--parsnip-text);
+  margin-top: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+.note-editor-content h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--parsnip-text);
+  margin-top: 0.5rem;
+  margin-bottom: 0.375rem;
+}
+.note-editor-content h3 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--parsnip-text);
+  margin-top: 0.375rem;
+  margin-bottom: 0.25rem;
+}
+
+/* Paragraph */
+.note-editor-content p {
+  margin-bottom: 0.5rem;
+}
+
+/* Inline code */
+.note-editor-content code {
+  background-color: var(--parsnip-navy-700);
+  color: var(--parsnip-teal);
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 0.8rem;
+}
+
+/* Code block */
+.note-editor-content pre {
+  background-color: var(--parsnip-navy);
+  border: 1px solid var(--parsnip-border);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+.note-editor-content pre code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  color: var(--parsnip-text);
+  font-size: 0.8rem;
+  line-height: 1.6;
+}
+
+/* Blockquote */
+.note-editor-content blockquote {
+  border-left: 3px solid var(--parsnip-teal);
+  padding-left: 1rem;
+  margin: 0.5rem 0;
+  color: var(--parsnip-muted);
+  font-style: italic;
+}
+
+/* Lists */
+.note-editor-content ul {
+  list-style-type: disc;
+  padding-left: 1.25rem;
+  margin: 0.25rem 0;
+}
+.note-editor-content ol {
+  list-style-type: decimal;
+  padding-left: 1.25rem;
+  margin: 0.25rem 0;
+}
+.note-editor-content li {
+  margin-bottom: 0.125rem;
+}
+
+/* Task list */
+.note-editor-content ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0;
+}
+.note-editor-content ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.375rem;
+}
+.note-editor-content ul[data-type="taskList"] li > label {
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+}
+.note-editor-content ul[data-type="taskList"] li > label input[type="checkbox"] {
+  accent-color: var(--parsnip-teal);
+  width: 0.875rem;
+  height: 0.875rem;
+  cursor: pointer;
+}
+.note-editor-content ul[data-type="taskList"] li > div {
+  flex: 1;
+}
+
+/* Table */
+.note-editor-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.5rem 0;
+  overflow: hidden;
+}
+.note-editor-content td,
+.note-editor-content th {
+  border: 1px solid var(--parsnip-border);
+  padding: 0.375rem 0.5rem;
+  min-width: 60px;
+  vertical-align: top;
+  text-align: left;
+}
+.note-editor-content th {
+  background-color: var(--parsnip-navy-700);
+  color: var(--parsnip-muted);
+  font-weight: 600;
+}
+.note-editor-content td {
+  color: var(--parsnip-text);
+}
+
+/* Highlight */
+.note-editor-content mark {
+  background-color: rgba(35, 192, 168, 0.25);
+  color: var(--parsnip-text);
+  border-radius: 0.125rem;
+  padding: 0 0.125rem;
+}
+
+/* Image */
+.note-editor-content img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.375rem;
+  margin: 0.5rem 0;
+}
+
+/* Link */
+.note-editor-content a {
+  color: var(--parsnip-teal);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 0.15s;
+}
+.note-editor-content a:hover {
+  color: var(--parsnip-blue);
+}
+
+/* Horizontal rule */
+.note-editor-content hr {
+  border-color: var(--parsnip-border);
+  margin: 0.75rem 0;
+}
+
+/* Selection highlight */
+.note-editor-content .ProseMirror-selectednode {
+  outline: 2px solid var(--parsnip-teal);
+  outline-offset: 1px;
+}
+
+/* Table resize handle (TipTap resizable tables) */
+.note-editor-content .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: -2px;
+  width: 4px;
+  background-color: var(--parsnip-teal);
+  pointer-events: none;
+}
+
+/* Resize cursor on table cells */
+.note-editor-content .tableWrapper {
+  overflow-x: auto;
+}
+.note-editor-content .resize-cursor {
+  cursor: col-resize;
+}
