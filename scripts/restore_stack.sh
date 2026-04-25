@@ -145,11 +145,15 @@ log "Phase 5: bringing up rest of stack"
 run "docker compose -p $COMPOSE_PROJECT -f $COMPOSE_FILE up -d"
 
 # ── PHASE 6: rsync volumes ────────────────────────────────────────────────────
-log "Phase 6: restoring volume contents from GCS"
+log "Phase 6: restoring volume contents from GCS (throttled)"
+GSUTIL_BW_LIMIT="${PARSNIP_DOWNLOAD_MIB_S:-25}"
 for vol in analysis_output owui_data pipelines_data; do
     log "  Volume: $vol"
     run "docker run --rm -v ${COMPOSE_PROJECT}_${vol}:/dst -v $SCRATCH_DIR:/scratch \
-        google/cloud-sdk:slim gsutil -m rsync -r gs://$GCS_BUCKET/volumes/$vol/ /dst/"
+        google/cloud-sdk:slim gsutil -m -o 'GSUtil:parallel_thread_count=4' \
+        -o 'GSUtil:sliced_object_download_threshold=100M' \
+        -o 'Boto:max_concurrent_requests=4' \
+        rsync -r gs://$GCS_BUCKET/volumes/$vol/ /dst/"
 done
 
 # ── PHASE 7: verification ─────────────────────────────────────────────────────

@@ -16,10 +16,8 @@ Endpoints:
   GET  /sessions/{id}/export — export session as markdown
 """
 
-import asyncio
 import json
 import logging
-import os
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -37,6 +35,7 @@ from pydantic import BaseModel
 from tools.db_pool import init_pool, get_pool, close_all
 from tools.pdf_ingest import ingest_pdf
 
+from admin_routes import admin_router
 from config import get_settings
 from graph import build_graph, _load_l1_memory
 
@@ -1688,3 +1687,6 @@ async def publish_hitl_review(note_id: str, req: HitlPublish) -> dict:
         "cycle_count": new_cycle,
         "content_hash": new_hash,
     }
+
+
+app.include_router(admin_router)

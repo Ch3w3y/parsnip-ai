@@ -34,7 +34,7 @@ services:
       - -c
       - archive_mode=on
       - -c
-      - archive_command=pgbackrest --stanza=parsnip archive-push %p
+      - archive_command=pgbackrest --config=/etc/pgbackrest/pgbackrest.conf --stanza=parsnip archive-push %p
       - -c
       - archive_timeout=300
       - -c
@@ -160,6 +160,8 @@ services:
       GCS_PROJECT_ID: ${GCS_PROJECT_ID:-agentic-storage}
       GOOGLE_APPLICATION_CREDENTIALS: /app/gcs-key.json
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      ADMIN_ENABLED: ${ADMIN_ENABLED:-false}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
     volumes:
       - ./gcs-key.json:/app/gcs-key.json:ro
       - ./storage:/app/storage:ro

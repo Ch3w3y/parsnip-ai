@@ -38,7 +38,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pyarrow as pa
+
 import psycopg
+
+from throttle import BackupThrottle
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("backup_kb")
@@ -194,9 +198,115 @@ def save_manifest(gcs, local_dir: Path, manifest: dict, use_gcs: bool):
 
 
 # ── Per-table export ─────────────────────────────────────────────────────────
-def export_table(conn, spec: TableSpec, out_path: Path, cutoff: datetime | None) -> dict:
-    """Export one table to Parquet. Returns stats dict."""
+def _normalise_chunk(df, spec):
     import pandas as pd
+
+    for col in df.columns:
+        if pd.api.types.is_datetime64_any_dtype(df[col]):
+            if df[col].dt.tz is None:
+                df[col] = df[col].dt.tz_localize("UTC")
+
+    # JSONB / dict / list columns → JSON string
+    for col in df.columns:
+        if df[col].dtype == object:
+            sample = df[col].dropna().head(20)
+            if sample.apply(lambda x: isinstance(x, (dict, list))).any():
+                df[col] = df[col].apply(lambda x: json.dumps(x) if x is not None else None)
+
+    # pgvector: keep raw string, encode to bytes for pa.binary() — avoids
+    # the triple-copy string→list[float]→Arrow that OOMs on large tables.
+    # On restore, the raw string is cast back via $embedding::vector.
+    if "embedding" in df.columns and spec.has_vector:
+        def _encode_embedding(x):
+            if x is None or isinstance(x, float):
+                return None
+            if isinstance(x, str):
+                return x.encode("utf-8")
+            return str(list(x)).encode("utf-8")
+
+        df["embedding"] = df["embedding"].apply(_encode_embedding)
+
+    return df
+
+
+def _chunk_size_for(spec: TableSpec) -> int:
+    if spec.has_vector:
+        return 2_000
+    if spec.has_bytea:
+        return 5_000
+    return 50_000
+
+
+def _get_timestamptz_cols(conn, table: str, col_set: set[str]) -> set[str]:
+    try:
+        rows = conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = %s AND data_type = 'timestamp with time zone' "
+            "AND column_name = ANY(%s)",
+            (table, list(col_set)),
+        ).fetchall()
+        return {r[0] for r in rows}
+    except Exception:
+        return set()
+
+
+def _pg_type_to_arrow(data_type: str) -> pa.DataType | None:
+    mapping = {
+        "bigint": pa.int64(),
+        "integer": pa.int32(),
+        "smallint": pa.int16(),
+        "double precision": pa.float64(),
+        "real": pa.float32(),
+        "boolean": pa.bool_(),
+        "text": pa.large_string(),
+        "character varying": pa.large_string(),
+        "jsonb": pa.large_string(),
+        "timestamp with time zone": pa.timestamp("us", tz="UTC"),
+        "timestamp without time zone": pa.timestamp("us"),
+        "date": pa.date32(),
+        "bytea": pa.large_binary(),
+        "uuid": pa.large_string(),
+    }
+    return mapping.get(data_type)
+
+
+def _build_arrow_schema(conn, table: str, columns: list[str], has_vector: bool) -> pa.Schema | None:
+    try:
+        rows = conn.execute(
+            "SELECT column_name, data_type FROM information_schema.columns "
+            "WHERE table_name = %s AND column_name = ANY(%s) ORDER BY ordinal_position",
+            (table, columns),
+        ).fetchall()
+    except Exception:
+        return None
+
+    col_map = {r[0]: r[1] for r in rows}
+    fields = []
+    for col in columns:
+        pg_type = col_map.get(col)
+        if pg_type is None:
+            return None
+        if has_vector and col == "embedding":
+            fields.append(pa.field("embedding", pa.binary()))
+            continue
+        arrow_type = _pg_type_to_arrow(pg_type)
+        if arrow_type is None:
+            return None
+        fields.append(pa.field(col, arrow_type))
+    return pa.schema(fields)
+
+
+def export_table(conn, spec: TableSpec, out_path: Path, cutoff: datetime | None, throttle: BackupThrottle | None = None) -> dict:
+    """Export one table to Parquet via server-side cursor streaming to avoid OOM.
+
+    Uses a named psycopg cursor so the DB holds the resultset and rows are
+    fetched in small batches (itersize).  This avoids loading the entire table
+    into client memory before the first chunk is yielded — the root cause of
+    OOM on knowledge_chunks (16 M rows × 4 KB embeddings).
+    """
+    import pandas as pd
+    import pyarrow as pa
+    import pyarrow.parquet as pq
 
     cols = ", ".join(spec.columns)
     where = ""
@@ -206,58 +316,111 @@ def export_table(conn, spec: TableSpec, out_path: Path, cutoff: datetime | None)
         params = (cutoff,)
     query = f"SELECT {cols} FROM {spec.name}{where}"
 
-    try:
-        df = pd.read_sql(query, conn, params=params)
-    except Exception as e:
-        logger.warning(f"  {spec.name}: query failed ({e}) — skipping")
-        return {"rows": 0, "size_bytes": 0, "max_cursor": None, "skipped": True}
+    # Wrap timestamp columns with clamp (psycopg can't parse year > 10K)
+    ts_col_names = _get_timestamptz_cols(conn, spec.name, set(spec.columns))
+    if ts_col_names:
+        safe_cols = []
+        for c in spec.columns:
+            if c in ts_col_names:
+                safe_cols.append(
+                    f"LEAST({c}, '2262-04-11 23:47:16.854775'::timestamptz) AS {c}"
+                )
+            else:
+                safe_cols.append(c)
+        query = f"SELECT {', '.join(safe_cols)} FROM {spec.name}{where}"
 
-    if df.empty:
+    chunk_size = _chunk_size_for(spec)
+    if throttle and throttle.cursor_itersize:
+        chunk_size = throttle.cursor_itersize
+    total_rows = 0
+    max_cursor_val = None
+    writer: pq.ParquetWriter | None = None
+    arrow_schema: pa.Schema | None = _build_arrow_schema(
+        conn, spec.name, spec.columns, spec.has_vector
+    )
+
+    # Clamp ceiling — if the max cursor value we observe equals this,
+    # it came from LEAST() clamping and we must query the real max instead.
+    CLAMP_CEILING = datetime(2262, 4, 11, 23, 47, 16, 854775, tzinfo=timezone.utc)
+
+    try:
+        # Named cursor → server-side cursor; itersize controls network fetch size
+        with conn.cursor(name=f"bkup_{spec.name}") as cur:
+            cur.itersize = chunk_size
+            cur.execute(query, params)
+            col_names = [d.name for d in cur.description] if cur.description else []
+
+            while True:
+                rows = cur.fetchmany(chunk_size)
+                if not rows:
+                    break
+                try:
+                    chunk_df = pd.DataFrame(rows, columns=col_names)
+
+                    if spec.cursor_column and spec.cursor_column in chunk_df.columns:
+                        col_vals = chunk_df[spec.cursor_column].dropna()
+                        if len(col_vals) > 0:
+                            col_max = col_vals.max()
+                            if max_cursor_val is None or col_max > max_cursor_val:
+                                max_cursor_val = col_max
+
+                    chunk_df = _normalise_chunk(chunk_df, spec)
+                    table = pa.Table.from_pandas(
+                        chunk_df, preserve_index=False, schema=arrow_schema
+                    )
+
+                    if spec.has_vector and "embedding" in table.schema.names:
+                        idx = table.schema.get_field_index("embedding")
+                        field = table.schema.field(idx)
+                        if field.type != pa.binary():
+                            table = table.set_column(
+                                idx, field.name, table.column(idx).cast(pa.binary())
+                            )
+
+                    if writer is None:
+                        writer_schema = arrow_schema or table.schema
+                        writer = pq.ParquetWriter(out_path, writer_schema, compression="zstd")
+                    writer.write_table(table)
+                    total_rows += len(chunk_df)
+                    logger.info(f"    {spec.name}: wrote {len(chunk_df)} rows (total {total_rows:,})")
+                    if throttle:
+                        throttle.sleep_between_batches()
+                except (pa.ArrowInvalid, pa.ArrowTypeError) as e:
+                    logger.warning(f"  {spec.name}: skipping chunk at row {total_rows:,} ({e})")
+                    continue
+    except Exception as e:
+        logger.warning(f"  {spec.name}: query failed ({e}) — keeping partial export")
+    finally:
+        if writer is not None:
+            writer.close()
+
+    if total_rows == 0:
         return {"rows": 0, "size_bytes": 0, "max_cursor": None}
 
-    # Normalize columns for Parquet compatibility
-    for col in df.columns:
-        if pd.api.types.is_datetime64_any_dtype(df[col]) and df[col].dt.tz is None:
-            df[col] = df[col].dt.tz_localize("UTC")
-
-    # JSONB / dict / list columns → JSON string
-    for col in df.columns:
-        if df[col].dtype == object:
-            sample = df[col].dropna().head(20)
-            if sample.apply(lambda x: isinstance(x, (dict, list))).any():
-                df[col] = df[col].apply(lambda x: json.dumps(x) if x is not None else None)
-
-    # pgvector → list[float]
-    if "embedding" in df.columns and spec.has_vector:
-        import numpy as np
-
-        def _to_list(x):
-            if x is None:
-                return None
-            if isinstance(x, str):
-                try:
-                    return [float(v) for v in x.strip("[]").split(",") if v.strip()]
-                except Exception:
-                    return None
-            if isinstance(x, (list, np.ndarray)):
-                return [float(v) for v in x]
-            return list(x)
-
-        df["embedding"] = df["embedding"].apply(_to_list)
-
-    # bytea → keep as bytes (pyarrow handles it)
-    df.to_parquet(out_path, engine="pyarrow", compression="zstd", index=False)
-
     max_cursor = None
-    if spec.cursor_column and spec.cursor_column in df.columns:
-        max_cursor = df[spec.cursor_column].max()
+    if spec.cursor_column and max_cursor_val is not None:
+        real_max = max_cursor_val
+        if isinstance(real_max, datetime) and real_max >= CLAMP_CEILING:
+            logger.warning(
+                f"  {spec.name}: max cursor hit clamp ceiling {CLAMP_CEILING}; "
+                f"querying real max from DB"
+            )
+            try:
+                real_max_row = conn.execute(
+                    f"SELECT MAX({spec.cursor_column}) FROM {spec.name} "
+                    f"WHERE {spec.cursor_column} < '2262-04-11 23:47:16.854775'::timestamptz"
+                ).fetchone()
+                real_max = real_max_row[0] if real_max_row and real_max_row[0] else max_cursor_val
+            except Exception as e:
+                logger.warning(f"  {spec.name}: real max query failed ({e}); using clamp ceiling")
+        max_cursor = real_max
         if hasattr(max_cursor, "isoformat"):
             max_cursor = max_cursor.isoformat()
         else:
             max_cursor = str(max_cursor)
 
     return {
-        "rows": len(df),
+        "rows": total_rows,
         "size_bytes": out_path.stat().st_size,
         "max_cursor": max_cursor,
     }
@@ -276,6 +439,9 @@ def main():
     args = parser.parse_args()
 
     use_gcs = not args.local
+    throttle = BackupThrottle.from_env()
+    throttle.nice()
+    throttle.log_config()
     sys.path.insert(0, str(Path(__file__).parent.parent / "storage"))
     from gcs import GCSClient  # noqa: E402
 
@@ -327,7 +493,7 @@ def main():
 
                 fname = f"{spec.name}_{args.mode}_{timestamp}.parquet"
                 out_path = backup_dir / fname
-                stats = export_table(conn, spec, out_path, cutoff)
+                stats = export_table(conn, spec, out_path, cutoff, throttle=throttle)
                 summary["tables"][spec.name] = stats
 
                 if stats["rows"] == 0:
@@ -337,7 +503,10 @@ def main():
 
                 if use_gcs:
                     gcs_path = f"backups/parquet/{spec.name}/dt={today}/{fname}"
-                    gcs.upload_file(str(out_path), gcs_path)
+                    if throttle:
+                        throttle.upload_file(gcs, str(out_path), gcs_path)
+                    else:
+                        gcs.upload_file(str(out_path), gcs_path)
                     logger.info(f"    uploaded {stats['rows']} rows → gs://{gcs.bucket_name}/{gcs_path}")
 
                 # Update manifest cursor

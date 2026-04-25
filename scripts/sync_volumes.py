@@ -29,6 +29,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from throttle import BackupThrottle
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("sync_volumes")
 
@@ -74,7 +76,7 @@ def should_skip(path: Path) -> bool:
     return bool(parts & SKIP_DIRS)
 
 
-def sync_volume(gcs, name: str, local_root: Path, dry_run: bool) -> SyncStats:
+def sync_volume(gcs, throttle: BackupThrottle, name: str, local_root: Path, dry_run: bool) -> SyncStats:
     stats = SyncStats()
     if not local_root.exists():
         logger.warning(f"  Volume {name} not mounted at {local_root}, skipping.")
@@ -116,7 +118,11 @@ def sync_volume(gcs, name: str, local_root: Path, dry_run: bool) -> SyncStats:
             if dry_run:
                 logger.info(f"  [dry-run] would upload {gcs_path} ({size:,} bytes)")
             else:
-                gcs.upload_file(str(path), gcs_path)
+                if throttle:
+                    throttle.upload_file(gcs, str(path), gcs_path)
+                else:
+                    gcs.upload_file(str(path), gcs_path)
+                throttle.sleep_between_batches()
                 logger.info(f"  uploaded {gcs_path} ({size:,} bytes)")
             stats.uploaded += 1
             stats.bytes_uploaded += size
@@ -140,6 +146,10 @@ def main():
     sys.path.insert(0, str(Path(__file__).parent.parent / "storage"))
     from gcs import GCSClient  # noqa: E402
 
+    throttle = BackupThrottle.from_env()
+    throttle.nice()
+    throttle.log_config()
+
     gcs = GCSClient()
     if args.gcs_bucket:
         gcs.bucket_name = args.gcs_bucket
@@ -154,7 +164,7 @@ def main():
 
     for name, mount in targets.items():
         logger.info(f"Syncing volume: {name} ({mount})")
-        stats = sync_volume(gcs, name, Path(mount), args.dry_run)
+        stats = sync_volume(gcs, throttle, name, Path(mount), args.dry_run)
         overall[name] = stats.__dict__
         logger.info(
             f"  Done: {stats.uploaded} uploaded, "

@@ -30,9 +30,9 @@ Usage:
 """
 
 import argparse
-import asyncio
 import json
 import sys
+import time
 from pathlib import Path
 
 import httpx
@@ -41,6 +41,8 @@ import pyarrow.parquet as pq
 from dotenv import load_dotenv
 from pgvector.psycopg import register_vector
 import os
+
+from throttle import BackupThrottle
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
@@ -65,7 +67,7 @@ def embed_batch_sync(texts: list[str], retries: int = 3) -> list[list[float]] | 
         except Exception as e:
             wait = 2 ** attempt
             print(f"  Embed attempt {attempt+1}/{retries} failed: {e} — retry in {wait}s")
-            import time; time.sleep(wait)
+            time.sleep(wait)
     return None
 
 
@@ -77,7 +79,7 @@ UPSERT_SQL = """
 """
 
 
-def restore_file(path: Path, conn, dry_run: bool, no_reembed: bool) -> dict:
+def restore_file(path: Path, conn, dry_run: bool, no_reembed: bool, throttle: BackupThrottle | None = None) -> dict:
     table = pq.read_table(path)
     col_names = table.schema.names
     has_embeddings = "embedding" in col_names
@@ -157,6 +159,8 @@ def restore_file(path: Path, conn, dry_run: bool, no_reembed: bool) -> dict:
                     skipped += 1
 
         print(f"    {inserted + skipped:,}/{total:,} processed ({inserted:,} inserted, {skipped:,} skipped)", end="\r")
+        if throttle:
+            throttle.sleep_between_batches()
 
     print(f"    {total:,} rows: {inserted:,} inserted, {skipped:,} already existed")
     return {"inserted": inserted, "skipped": skipped}
@@ -169,6 +173,8 @@ def main():
                         help="Skip files that have no embedding column (instead of re-embedding)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Count rows only, do not write to DB")
+    parser.add_argument("--throttle", action="store_true", default=True,
+                        help="Enable CPU/network throttling (default: enabled)")
     args = parser.parse_args()
 
     if not DATABASE_URL:
@@ -193,9 +199,13 @@ def main():
     conn = psycopg.connect(DATABASE_URL)
     register_vector(conn)
 
+    throttle = BackupThrottle.from_env()
+    throttle.nice()
+    throttle.log_config()
+
     totals = {"inserted": 0, "skipped": 0, "dry_run": 0}
     for f in files:
-        result = restore_file(f, conn, args.dry_run, args.no_reembed)
+        result = restore_file(f, conn, args.dry_run, args.no_reembed, throttle=throttle)
         for k, v in result.items():
             totals[k] = totals.get(k, 0) + v
 

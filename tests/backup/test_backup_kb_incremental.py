@@ -17,6 +17,7 @@ def kb_module():
     sys.path.insert(0, str(ROOT / "storage"))
     spec = importlib.util.spec_from_file_location("backup_kb", SCRIPT)
     mod = importlib.util.module_from_spec(spec)
+    sys.modules["backup_kb"] = mod  # Python 3.14 dataclass regression fix
     spec.loader.exec_module(mod)
     return mod
 

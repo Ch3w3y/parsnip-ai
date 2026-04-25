@@ -18,6 +18,7 @@ def sv_module():
     sys.path.insert(0, str(ROOT / "storage"))
     spec = importlib.util.spec_from_file_location("sync_volumes", SCRIPT)
     mod = importlib.util.module_from_spec(spec)
+    sys.modules["sync_volumes"] = mod  # Python 3.14 dataclass regression fix
     spec.loader.exec_module(mod)
     return mod
 
@@ -60,7 +61,7 @@ def test_md5_matches_gcs_format(sv_module, tmp_path):
 
 def test_sync_volume_skips_missing_mount(sv_module):
     """If the mount doesn't exist (volume not configured), return empty stats not raise."""
-    stats = sv_module.sync_volume(gcs=None, name="phantom",
+    stats = sv_module.sync_volume(gcs=None, throttle=None, name="phantom",
                                   local_root=Path("/nonexistent/mount"),
                                   dry_run=True)
     assert stats.uploaded == 0

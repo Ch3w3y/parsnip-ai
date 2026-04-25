@@ -1,8 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { usePanelStore, type LeftPanelType, type RightPanelType } from "../stores/panel-store";
 import { HeaderKBWidget } from "./HeaderKBWidget";
 import { PanelIconButton } from "./ui/panel";
+
+const ADMIN_ENABLED = process.env.NEXT_PUBLIC_ADMIN_ENABLED === "true";
 
 const LEFT_CYCLE: LeftPanelType[] = ["threads", "memories", "closed"];
 const RIGHT_CYCLE: RightPanelType[] = ["stats", "outputs", "closed"];
@@ -40,6 +43,18 @@ export function Header() {
       </div>
 
       <div className="flex items-center gap-2">
+        {ADMIN_ENABLED && (
+          <Link
+            href="/admin"
+            className="flex items-center gap-1 text-xs text-parsnip-muted hover:text-parsnip-text transition-colors px-2 py-1 rounded hover:bg-navy-800"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+            Admin
+          </Link>
+        )}
+
         <PanelIconButton
           onClick={cycleLeft}
           className={`${

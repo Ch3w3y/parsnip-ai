@@ -183,25 +183,65 @@ Generated artifacts are operational data. They should be backed up or retained a
 
 ## 7. Backup and Recovery Flow
 
-Backups are snapshot artifacts. They are not replacements for the live database volume.
+The backup system uses a layered defense-in-depth approach: physical (pgBackRest), logical (Parquet), config, and volume-level.
+
+### 7.1 Backup Architecture
 
 ```mermaid
-flowchart LR
-    Scheduler[Scheduler] --> KBBackup[backup_kb.py]
-    Scheduler --> ConfigBackup[backup_config.py]
+flowchart TB
+    subgraph Scheduler[Scheduler Service]
+        S1[Hourly incremental<br/>backup_kb.py]
+        S2[Weekly full<br/>backup_kb.py --mode full]
+        S3[Daily config<br/>backup_config.py]
+        S4[Daily volume sync<br/>sync_volumes.py]
+        S5[pgBackRest<br/>weekly full / daily diff / 5-min WAL]
+    end
 
-    KBBackup --> PG[(PostgreSQL)]
-    KBBackup --> Parquet[Parquet exports<br/>KB, memories, Joplin metadata]
+    subgraph Sources
+        PG[(PostgreSQL<br/>agent_kb + joplin)]
+        Vol[Docker volumes<br/>analysis_output<br/>owui_data<br/>pipelines_data]
+        Proj[Project files<br/>configs + code]
+    end
 
-    ConfigBackup --> Project[Project config and selected code]
-    ConfigBackup --> Tarball[Compressed tarball]
+    subgraph GCS[(Google Cloud Storage)]
+        PGRepo[pgBackRest repo<br/>full + diff + WAL]
+        Parquet[Parquet partitions<br/>_manifest.json]
+        Config[config.tar.gz<br/>secrets.tar.gz.age<br/>volume_manifest.json]
+        VolSync[Volume snapshots<br/>rsync with md5 dedup]
+    end
 
-    Parquet --> LocalBackup[/Local backup dir/]
-    Tarball --> LocalBackup
-    LocalBackup --> GCS[(Optional GCS bucket)]
+    PG --> S5 --> PGRepo
+    PG --> S1 --> Parquet
+    PG --> S2 --> Parquet
+    Proj --> S3 --> Config
+    Vol --> S4 --> VolSync
 ```
 
-Recovery should be tested from backup artifacts before relying on them for production operations.
+### 7.2 Restore Flow
+
+A restore orchestrator (`restore_stack.sh`) performs 6 phases:
+1. Pull config + decrypt secrets
+2. Start postgres container and wait for health
+3. pgBackRest restore (optionally to a target time)
+4. Start remaining stack services
+5. Rsync volumes from GCS
+6. Verify: row counts, sample content byte-equality, embedding cosine similarity >=0.9999
+
+For PITR, specify `--at "YYYY-MM-DD HH:MM"`.  For sandbox testing, use `--target sandbox`.
+
+### 7.3 Retention
+
+| Backup Type | Retention | Rotation |
+|-------------|-----------|----------|
+| pgBackRest full | 4 weeks | Weekly Sunday 03:00 UTC |
+| pgBackRest diff | 7 days | Daily |
+| WAL archives | 7 days | Real-time (5-min archive_timeout) |
+| Parquet full | 4 weeks | Weekly Sunday 02:30 UTC |
+| Parquet incremental | 7 days | Hourly |
+| Config | 30 days | Daily |
+| Volume sync | 7 days | Daily |
+
+> **Warning:** Backups are snapshot artifacts. They are not replacements for the live database volume. Recovery should be tested from backup artifacts before relying on them for production operations.
 
 ## 8. Guardrails
 
