@@ -1,4 +1,3 @@
-from .kb_search import kb_search
 from .research import research
 from .holistic_search import holistic_search
 from .adaptive_search import adaptive_search
@@ -50,7 +49,6 @@ from .system import system_status
 from .filtered_search import search_with_filters
 
 __all__ = [
-    "kb_search",
     "research",
     "holistic_search",
     "adaptive_search",

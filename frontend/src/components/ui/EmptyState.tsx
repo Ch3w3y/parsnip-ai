@@ -1,6 +1,15 @@
 "use client";
 
 import type { ReactNode } from "react";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import { Button } from "@/components/ui/button";
 
 interface EmptyStateProps {
   icon?: ReactNode;
@@ -19,23 +28,23 @@ export function EmptyState({
   cta,
 }: EmptyStateProps) {
   return (
-    <div className="flex flex-col items-center justify-center px-6 py-8 text-center">
-      {icon ? <div className="mb-3 text-parsnip-muted">{icon}</div> : null}
-      <div className="text-sm font-medium text-parsnip-text">{title}</div>
-      {description ? (
-        <div className="mt-1 max-w-sm text-xs leading-relaxed text-parsnip-muted">
-          {description}
-        </div>
-      ) : null}
+    <Empty>
+      <EmptyHeader>
+        {icon ? <EmptyMedia>{icon}</EmptyMedia> : null}
+        <EmptyTitle>{title}</EmptyTitle>
+        {description ? <EmptyDescription>{description}</EmptyDescription> : null}
+      </EmptyHeader>
       {cta ? (
-        <button
+        <EmptyContent>
+          <Button
           type="button"
           onClick={cta.onClick}
-          className="mt-4 rounded-md bg-parsnip-teal px-3 py-1.5 text-xs font-medium text-navy-950 transition-colors hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-parsnip-teal/40"
+          size="sm"
         >
           {cta.label}
-        </button>
+          </Button>
+        </EmptyContent>
       ) : null}
-    </div>
+    </Empty>
   );
 }

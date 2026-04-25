@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
 interface ApprovalUIProps {
   /** What the agent wants to do (human-readable) */
@@ -60,11 +62,11 @@ export function ApprovalUI({
   const dashOffset = circumference * (1 - progress);
 
   return (
-    <div className="tool-card border-parsnip-warning/60 bg-navy-800/50">
+    <Card className="my-2 border-parsnip-warning/60 bg-navy-800/50 p-4">
       <div className="flex items-start gap-3">
         {/* Countdown ring */}
         {autoApproveSeconds > 0 && (
-          <div className="flex-shrink-0 mt-0.5">
+          <div className="relative mt-0.5 flex-shrink-0">
             <svg width="32" height="32" className="countdown-ring">
               <circle
                 cx="16"
@@ -100,18 +102,20 @@ export function ApprovalUI({
           <p className="text-sm text-parsnip-text mb-3">{description}</p>
 
           <div className="flex gap-2">
-            <button
+            <Button
               onClick={handleApprove}
-              className="px-4 py-1.5 text-sm font-medium rounded-md bg-parsnip-teal/15 text-parsnip-teal hover:bg-parsnip-teal/25 transition-colors border border-parsnip-teal/30"
+              variant="success"
+              size="sm"
             >
               Approve
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={handleReject}
-              className="px-4 py-1.5 text-sm font-medium rounded-md bg-parsnip-error/15 text-parsnip-error hover:bg-parsnip-error/25 transition-colors border border-parsnip-error/30"
+              variant="destructive"
+              size="sm"
             >
               Reject
-            </button>
+            </Button>
           </div>
 
           {autoApproveSeconds > 0 && (
@@ -121,6 +125,6 @@ export function ApprovalUI({
           )}
         </div>
       </div>
-    </div>
+    </Card>
   );
 }

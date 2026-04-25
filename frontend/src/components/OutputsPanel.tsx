@@ -1,10 +1,13 @@
 "use client";
 
 import React from "react";
-import { useThreadStore } from "../stores/thread-store";
+import { useThreadStore, selectCurrentThreadId } from "../stores/thread-store";
 import { EmptyState } from "./ui/EmptyState";
 import { ErrorBanner } from "./ui/ErrorBanner";
 import { LoadingSkeleton } from "./ui/LoadingSkeleton";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { PanelActions, PanelHeader, PanelIconButton, PanelTitle } from "./ui/panel";
 
 interface OutputFile {
   name: string;
@@ -61,10 +64,16 @@ function RefreshIcon() {
 
 export function OutputsPanel() {
   const lastAnalysisToolAt = useThreadStore((s) => s.lastAnalysisToolAt);
+  const currentThreadId = useThreadStore(selectCurrentThreadId);
+  const threads = useThreadStore((s) => s.threads);
   const [outputs, setOutputs] = React.useState<OutputFile[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [typeFilter, setTypeFilter] = React.useState<string>("");
+
+  const currentThreadTitle = currentThreadId
+    ? threads.find((t) => t.id === currentThreadId)?.title ?? "Thread"
+    : null;
 
   const fetchOutputs = React.useCallback(async () => {
     setIsLoading(true);
@@ -113,7 +122,7 @@ export function OutputsPanel() {
 
   React.useEffect(() => {
     fetchOutputs();
-  }, [fetchOutputs]);
+  }, [currentThreadId, fetchOutputs]);
 
   React.useEffect(() => {
     if (lastAnalysisToolAt !== null) {
@@ -178,44 +187,47 @@ export function OutputsPanel() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-3 border-b border-navy-700">
-        <span className="text-xs font-semibold text-parsnip-muted uppercase tracking-wider">
-          Outputs
-        </span>
-        <button
+      <PanelHeader>
+        <PanelTitle>Outputs</PanelTitle>
+        <PanelActions>
+          <PanelIconButton
           onClick={fetchOutputs}
           disabled={isLoading}
-          className="text-parsnip-muted hover:text-parsnip-teal transition-colors p-1 rounded disabled:opacity-50"
-          title="Refresh"
+          label="Refresh outputs"
         >
           <RefreshIcon />
-        </button>
+          </PanelIconButton>
+        </PanelActions>
+      </PanelHeader>
+
+      <div className="px-3 py-1.5 border-b border-navy-800 flex items-center gap-1.5">
+        <Badge variant={currentThreadId ? "default" : "muted"} className="max-w-full truncate text-[10px]">
+          {currentThreadTitle
+            ? `Thread: ${currentThreadTitle}`
+            : "All threads"}
+        </Badge>
       </div>
 
       {outputs.length > 0 && (
         <div className="flex items-center gap-1 px-3 py-2 border-b border-navy-800 flex-wrap">
-          <button
+          <Button
             onClick={() => setTypeFilter("")}
-            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
-              typeFilter === ""
-                ? "bg-parsnip-teal/20 text-parsnip-teal"
-                : "bg-navy-800 text-parsnip-muted hover:text-parsnip-text"
-            }`}
+            variant={typeFilter === "" ? "success" : "outline"}
+            size="xs"
+            className="h-6 text-[10px]"
           >
             All
-          </button>
+          </Button>
           {activeTypes.map((ft) => (
-            <button
+            <Button
               key={ft}
               onClick={() => setTypeFilter(ft === typeFilter ? "" : ft)}
-              className={`px-2 py-0.5 rounded text-[10px] font-medium uppercase transition-colors ${
-                typeFilter === ft
-                  ? "bg-parsnip-teal/20 text-parsnip-teal"
-                  : "bg-navy-800 text-parsnip-muted hover:text-parsnip-text"
-              }`}
+              variant={typeFilter === ft ? "success" : "outline"}
+              size="xs"
+              className="h-6 text-[10px] uppercase"
             >
               {ft}
-            </button>
+            </Button>
           ))}
         </div>
       )}

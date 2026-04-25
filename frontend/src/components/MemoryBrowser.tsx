@@ -17,6 +17,9 @@ import {
 import { EmptyState } from "./ui/EmptyState";
 import { ErrorBanner } from "./ui/ErrorBanner";
 import { LoadingSkeleton } from "./ui/LoadingSkeleton";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { PanelActions, PanelHeader, PanelIconButton, PanelTitle } from "./ui/panel";
 
 function formatTime(iso: string | null) {
   if (!iso) return "";
@@ -82,74 +85,67 @@ export function MemoryBrowser() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-<div className="flex items-center justify-between px-3 py-3 border-b border-navy-700">
-        <span className="text-xs font-semibold text-parsnip-muted uppercase tracking-wider">
-          Memories
-        </span>
-        <div className="flex items-center gap-1">
-          <button
+      <PanelHeader>
+        <PanelTitle>Memories</PanelTitle>
+        <PanelActions>
+          <PanelIconButton
             onClick={loadMemories}
-            className="text-parsnip-muted hover:text-parsnip-teal transition-colors p-1 rounded"
-            title="Refresh"
+            label="Refresh memories"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 12a9 9 0 1 1-6.219-8.56" />
               <polyline points="21,3 21,9 15,9" />
             </svg>
-          </button>
-          <button
+          </PanelIconButton>
+          <PanelIconButton
             onClick={() => setFiltersOpen(!filtersOpen)}
             className={`transition-colors p-1 rounded ${
               filtersOpen
                 ? "text-parsnip-teal"
                 : "text-parsnip-muted hover:text-parsnip-teal"
             }`}
-            title="Toggle filters"
+            label="Toggle filters"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polygon points="22,3 2,3 10,12.46 10,19 14,21 14,12.46" />
             </svg>
-          </button>
-        </div>
-      </div>
+          </PanelIconButton>
+        </PanelActions>
+      </PanelHeader>
 
 
       {filtersOpen && (
         <div className="border-b border-navy-700">
 
           <div className="px-3 pt-2 pb-1">
-            <input
+            <Input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search memories..."
-              className="w-full bg-navy-800 border border-navy-700 rounded text-sm text-parsnip-text placeholder-parsnip-muted px-2 py-1.5 focus:outline-none focus:border-parsnip-teal transition-colors"
+              className="h-8 bg-navy-800"
             />
           </div>
 
 <div className="flex items-center gap-1.5 px-3 py-2 overflow-x-auto">
-            <button
+            <Button
               onClick={() => setCategoryFilter("")}
-              className={`shrink-0 text-xs px-2 py-1 rounded border transition-colors ${
-                !categoryFilter
-                  ? "bg-parsnip-teal/20 text-parsnip-teal border-parsnip-teal"
-                  : "bg-navy-800 text-parsnip-muted border-navy-700 hover:text-parsnip-text"
-              }`}
+              variant={!categoryFilter ? "success" : "outline"}
+              size="xs"
+              className="shrink-0"
             >
               All
-            </button>
+            </Button>
             {MEMORY_CATEGORIES.map((cat) => (
-              <button
+              <Button
                 key={cat}
                 onClick={() => setCategoryFilter(cat === categoryFilter ? "" : cat)}
-                className={`shrink-0 text-xs px-2 py-1 rounded border transition-colors ${
-                  categoryFilter === cat
-                    ? "bg-parsnip-teal/20 text-parsnip-teal border-parsnip-teal"
-                    : "bg-navy-800 text-parsnip-muted border-navy-700 hover:text-parsnip-text"
-                }`}
+                variant={categoryFilter === cat ? "success" : "outline"}
+                size="xs"
+                className="shrink-0"
               >
                 {cat.replace("_", " ")}
-              </button>
+              </Button>
             ))}
           </div>
 
@@ -157,19 +153,17 @@ export function MemoryBrowser() {
             <span className="text-[10px] text-parsnip-muted shrink-0">Importance:</span>
             <div className="flex items-center gap-1">
               {Array.from({ length: IMPORTANCE_RANGE.max }, (_, i) => i + 1).map((level) => (
-                <button
+                <Button
                   key={level}
                   onClick={() => setImportanceFilter(importanceFilter === level ? 0 : level)}
-                  className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] border transition-colors ${
-                    importanceFilter === level
-                      ? "bg-parsnip-teal/20 text-parsnip-teal border-parsnip-teal"
-                      : "bg-navy-800 text-parsnip-muted border-navy-700 hover:text-parsnip-text"
-                  }`}
+                  variant={importanceFilter === level ? "success" : "outline"}
+                  size="xs"
+                  className="h-6 gap-0.5 px-1.5 text-[10px]"
                   title={`Min importance: ${IMPORTANCE_RANGE.labels[level - 1]}`}
                 >
                   {level}
                   <span className="inline-block w-1 h-1 rounded-full bg-current" />
-                </button>
+                </Button>
               ))}
             </div>
           </div>
@@ -177,12 +171,14 @@ export function MemoryBrowser() {
 
           {hasActiveFilters && (
             <div className="px-3 pb-2">
-              <button
+              <Button
                 onClick={clearFilters}
-                className="text-[10px] text-parsnip-muted hover:text-parsnip-teal transition-colors"
+                variant="link"
+                size="xs"
+                className="h-auto p-0 text-[10px] text-muted-foreground"
               >
                 Clear all filters
-              </button>
+              </Button>
             </div>
           )}
         </div>

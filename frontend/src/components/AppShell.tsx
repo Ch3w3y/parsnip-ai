@@ -1,19 +1,87 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
-import {
-  Group,
-  Panel,
-  Separator,
-  usePanelRef,
-} from "react-resizable-panels";
+import { useCallback, useEffect, useState } from "react";
+import { usePanelRef } from "react-resizable-panels";
 import type { PanelSize } from "react-resizable-panels";
-import { usePanelStore } from "../stores/panel-store";
+import { usePanelStore, selectPreviousCenterView } from "../stores/panel-store";
+import { useNoteStore } from "../stores/note-store";
 import { Header } from "./Header";
 import { LeftSidebar } from "./LeftSidebar";
 import { RightSidebar } from "./RightSidebar";
 import { Thread } from "./assistant-ui/thread";
+import { WelcomeScreen } from "./WelcomeScreen";
+import { NoteEditor } from "./NoteEditor";
 import { ToolBoundary } from "./tools/ToolBoundary";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "./ui/resizable";
+
+function CenterViewSwitcher() {
+  const centerView = usePanelStore((s) => s.centerView);
+  const currentNoteId = useNoteStore((s) => s.currentNoteId);
+  const currentNote = useNoteStore((s) => s.currentNote);
+  const updateNote = useNoteStore((s) => s.updateNote);
+  const previousCenterView = usePanelStore(selectPreviousCenterView);
+  const setCenterView = usePanelStore((s) => s.setCenterView);
+  const [visible, setVisible] = useState(true);
+  const [mountedView, setMountedView] = useState(centerView);
+
+  useEffect(() => {
+    if (centerView !== mountedView) {
+      setVisible(false);
+      const timer = setTimeout(() => {
+        setMountedView(centerView);
+        setVisible(true);
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [centerView, mountedView]);
+
+  useEffect(() => {
+    setMountedView(centerView);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const renderContent = () => {
+    switch (mountedView) {
+      case "thread":
+        return <Thread />;
+      case "welcome":
+        return <WelcomeScreen />;
+      case "notebook":
+        if (!currentNoteId) {
+          return (
+            <div className="flex items-center justify-center h-full text-parsnip-muted text-sm">
+              Select a note to view
+            </div>
+          );
+        }
+         return (
+          <NoteEditor
+            noteId={currentNoteId}
+            initialContent={currentNote?.content ?? ""}
+            onSave={(content) => updateNote(currentNoteId, { content })}
+            onBack={() => setCenterView(previousCenterView)}
+          />
+        );
+      default:
+        return <Thread />;
+    }
+  };
+
+  return (
+    <div
+      className="flex flex-col h-full transition-all duration-200 ease-out"
+      style={{
+        opacity: visible ? 1 : 0,
+        transform: visible ? "translateX(0)" : "translateX(8px)",
+      }}
+    >
+      {renderContent()}
+    </div>
+  );
+}
 
 export function AppShell() {
   const leftPanel = usePanelStore((s) => s.leftPanel);
@@ -65,8 +133,8 @@ export function AppShell() {
     <div className="flex flex-col h-screen bg-navy-950 overflow-hidden">
       <Header />
       <div className="accent-line" />
-      <Group orientation="horizontal" className="flex-1">
-        <Panel
+      <ResizablePanelGroup orientation="horizontal" className="flex-1">
+        <ResizablePanel
           id="left"
           defaultSize="20%"
           minSize="14%"
@@ -77,21 +145,21 @@ export function AppShell() {
           panelRef={leftPanelRef}
         >
           {!leftCollapsed && <LeftSidebar />}
-        </Panel>
+        </ResizablePanel>
 
-        <Separator className="w-[2px] bg-navy-600 hover:bg-parsnip-teal/50 transition-colors duration-200" />
+        <ResizableHandle className="w-[2px] bg-border hover:bg-primary/50 transition-colors duration-200" />
 
-        <Panel id="center" minSize="30%">
+        <ResizablePanel id="center" minSize="30%">
           <div className="flex flex-col h-full bg-navy-950 overflow-hidden">
             <ToolBoundary>
-              <Thread />
+              <CenterViewSwitcher />
             </ToolBoundary>
           </div>
-        </Panel>
+        </ResizablePanel>
 
-        <Separator className="w-[2px] bg-navy-600 hover:bg-parsnip-teal/50 transition-colors duration-200" />
+        <ResizableHandle className="w-[2px] bg-border hover:bg-primary/50 transition-colors duration-200" />
 
-        <Panel
+        <ResizablePanel
           id="right"
           defaultSize="26%"
           minSize="20%"
@@ -102,8 +170,8 @@ export function AppShell() {
           panelRef={rightPanelRef}
         >
           {!rightCollapsed && <RightSidebar />}
-        </Panel>
-      </Group>
+        </ResizablePanel>
+      </ResizablePanelGroup>
     </div>
   );
 }

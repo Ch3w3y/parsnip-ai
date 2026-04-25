@@ -6,7 +6,6 @@ from graph_state import _dedupe_tools
 from tools import (
     adaptive_search,
     holistic_search,
-    kb_search,
     research,
     get_document,
     arxiv_search,
@@ -85,7 +84,6 @@ from tools.hitl import (
 CORE_TOOLS = [
     adaptive_search,
     holistic_search,
-    kb_search,
     web_search,
     extract_webpage,
     get_document,
@@ -206,7 +204,6 @@ SAME_TOOL_REPEAT_LIMITS = {
     "execute_workspace_script": 5,
     "write_and_execute_script": 5,
     "web_search": 3,
-    "kb_search": 3,
     "holistic_search": 3,
     "adaptive_search": 3,
 }

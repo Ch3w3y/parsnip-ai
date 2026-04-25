@@ -1,5 +1,7 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
+
 interface ErrorBannerProps {
   message: string;
   onRetry?: () => void;
@@ -11,7 +13,7 @@ export function ErrorBanner({ message, onRetry, detail }: ErrorBannerProps) {
     <div
       role="alert"
       aria-live="assertive"
-      className="flex items-start gap-3 rounded-md border border-red-700/50 bg-red-900/30 p-3 text-red-200"
+      className="flex items-start gap-3 rounded-md border border-destructive/40 bg-destructive/15 p-3 text-destructive"
     >
       <svg
         className="mt-0.5 h-4 w-4 shrink-0"
@@ -35,13 +37,15 @@ export function ErrorBanner({ message, onRetry, detail }: ErrorBannerProps) {
       </div>
 
       {onRetry ? (
-        <button
+        <Button
           type="button"
           onClick={onRetry}
-          className="shrink-0 rounded bg-red-800/40 px-2.5 py-1 text-xs font-medium text-red-100 transition-colors hover:bg-red-800/60 focus:outline-none focus:ring-2 focus:ring-red-300/40"
+          variant="destructive"
+          size="xs"
+          className="shrink-0"
         >
           Retry
-        </button>
+        </Button>
       ) : null}
     </div>
   );

@@ -12,6 +12,7 @@ import {
 import { EmptyState } from "./ui/EmptyState";
 import { ErrorBanner } from "./ui/ErrorBanner";
 import { LoadingSkeleton } from "./ui/LoadingSkeleton";
+import { PanelActions, PanelHeader, PanelIconButton, PanelTitle } from "./ui/panel";
 
 function RefreshIcon() {
   return (
@@ -75,21 +76,20 @@ export function KBStatsPanel() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-3 border-b border-navy-700">
-        <span className="text-xs font-semibold text-parsnip-muted uppercase tracking-wider">
-          Knowledge Base
-        </span>
-        <button
+      <PanelHeader>
+        <PanelTitle>Knowledge Base</PanelTitle>
+        <PanelActions>
+          <PanelIconButton
           onClick={() => {
             loadStats();
             loadIngestionStatus();
           }}
-          className="text-parsnip-muted hover:text-parsnip-teal transition-colors p-1 rounded"
-          title="Refresh"
+          label="Refresh knowledge base stats"
         >
           <RefreshIcon />
-        </button>
-      </div>
+          </PanelIconButton>
+        </PanelActions>
+      </PanelHeader>
 
       <div className="flex-1 overflow-y-auto">
         {error && (

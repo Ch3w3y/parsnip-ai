@@ -3,8 +3,8 @@
 import { usePanelStore, type LeftPanelType } from "../stores/panel-store";
 import { ThreadList } from "./ThreadList";
 import { MemoryBrowser } from "./MemoryBrowser";
-import { KBSearchPanel } from "./KBSearchPanel";
 import { NotesBrowser } from "./NotesBrowser";
+import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 
 function ChatBubbleIcon() {
   return (
@@ -31,18 +31,6 @@ function BrainIcon() {
   );
 }
 
-function DocumentStackIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="4" y="4" width="12" height="16" rx="1" />
-      <rect x="7" y="2" width="12" height="16" rx="1" />
-      <line x1="10" y1="7" x2="16" y2="7" />
-      <line x1="10" y1="11" x2="16" y2="11" />
-      <line x1="10" y1="15" x2="14" y2="15" />
-    </svg>
-  );
-}
-
 function PencilSquareIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -55,7 +43,6 @@ function PencilSquareIcon() {
 const TABS: { id: LeftPanelType; icon: typeof ChatBubbleIcon; label: string }[] = [
   { id: "threads", icon: ChatBubbleIcon, label: "Threads" },
   { id: "memories", icon: BrainIcon, label: "Memories" },
-  { id: "kb", icon: DocumentStackIcon, label: "Knowledge" },
   { id: "notes", icon: PencilSquareIcon, label: "Notes" },
 ];
 
@@ -65,31 +52,27 @@ export function LeftSidebar() {
 
   return (
     <div className="flex flex-col h-full bg-navy-900 overflow-hidden">
-      <div className="flex items-center border-b border-navy-700 px-1">
+      <Tabs value={leftPanel} onValueChange={(value) => setLeftPanel(value as LeftPanelType)}>
+      <TabsList className="flex h-auto justify-start rounded-none border-b border-border bg-transparent px-1">
         {TABS.map((tab) => {
           const Icon = tab.icon;
-          const isActive = leftPanel === tab.id;
           return (
-            <button
+            <TabsTrigger
               key={tab.id}
-              onClick={() => setLeftPanel(tab.id)}
-              className={`flex items-center justify-center p-2.5 transition-colors duration-150 border-b-2 ${
-                isActive
-                  ? "text-parsnip-teal border-parsnip-teal"
-                  : "text-parsnip-muted border-transparent hover:text-parsnip-text hover:border-navy-600"
-              }`}
+              value={tab.id}
+              className="border-b-2 border-transparent p-2.5 text-muted-foreground data-[state=active]:border-primary data-[state=active]:text-primary"
               title={tab.label}
             >
               <Icon />
-            </button>
+            </TabsTrigger>
           );
         })}
-      </div>
+      </TabsList>
+      </Tabs>
 
       <div className="flex-1 overflow-hidden">
         {leftPanel === "threads" && <ThreadList />}
         {leftPanel === "memories" && <MemoryBrowser />}
-        {leftPanel === "kb" && <KBSearchPanel />}
         {leftPanel === "notes" && <NotesBrowser />}
       </div>
     </div>

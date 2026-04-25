@@ -12,6 +12,7 @@ import { NoteEditor } from "./NoteEditor";
 import { OutputsPanel } from "./OutputsPanel";
 import { EmptyState } from "./ui/EmptyState";
 import { ErrorBanner } from "./ui/ErrorBanner";
+import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 
 function ChartBarIcon() {
   return (
@@ -107,26 +108,23 @@ export function RightSidebar() {
 
   return (
     <div className="flex flex-col h-full bg-navy-900 overflow-hidden">
-      <div className="flex items-center border-b border-navy-700 px-1">
+      <Tabs value={rightPanel} onValueChange={(value) => setRightPanel(value as RightPanelType)}>
+      <TabsList className="flex h-auto justify-start rounded-none border-b border-border bg-transparent px-1">
         {TABS.map((tab) => {
           const Icon = tab.icon;
-          const isActive = rightPanel === tab.id;
           return (
-            <button
+            <TabsTrigger
               key={tab.id}
-              onClick={() => setRightPanel(tab.id)}
-              className={`flex items-center justify-center p-2.5 transition-colors duration-150 border-b-2 ${
-                isActive
-                  ? "text-parsnip-teal border-parsnip-teal"
-                  : "text-parsnip-muted border-transparent hover:text-parsnip-text hover:border-navy-600"
-              }`}
+              value={tab.id}
+              className="border-b-2 border-transparent p-2.5 text-muted-foreground data-[state=active]:border-primary data-[state=active]:text-primary"
               title={tab.label}
             >
               <Icon />
-            </button>
+            </TabsTrigger>
           );
         })}
-      </div>
+      </TabsList>
+      </Tabs>
 
       <div className="flex-1 overflow-hidden">
         {rightPanel === "stats" && <KBStatsPanel />}

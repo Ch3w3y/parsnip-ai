@@ -1,8 +1,10 @@
 "use client";
 
 import { usePanelStore, type LeftPanelType, type RightPanelType } from "../stores/panel-store";
+import { HeaderKBWidget } from "./HeaderKBWidget";
+import { PanelIconButton } from "./ui/panel";
 
-const LEFT_CYCLE: LeftPanelType[] = ["threads", "memories", "kb", "closed"];
+const LEFT_CYCLE: LeftPanelType[] = ["threads", "memories", "closed"];
 const RIGHT_CYCLE: RightPanelType[] = ["stats", "outputs", "closed"];
 
 export function Header() {
@@ -33,36 +35,40 @@ export function Header() {
         </span>
       </div>
 
+      <div className="flex-1 flex justify-center">
+        <HeaderKBWidget />
+      </div>
+
       <div className="flex items-center gap-2">
-        <button
+        <PanelIconButton
           onClick={cycleLeft}
-          className={`p-1.5 rounded transition-colors duration-150 ${
+          className={`${
             leftPanel !== "closed"
               ? "text-parsnip-teal hover:bg-navy-800"
               : "text-parsnip-muted hover:text-parsnip-text hover:bg-navy-800"
           }`}
-          title={`Left panel: ${leftPanel}`}
+          label={`Left panel: ${leftPanel}`}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="3" y="3" width="18" height="18" rx="2" />
             <line x1="9" y1="3" x2="9" y2="21" />
           </svg>
-        </button>
+        </PanelIconButton>
 
-        <button
+        <PanelIconButton
           onClick={cycleRight}
-          className={`p-1.5 rounded transition-colors duration-150 ${
+          className={`${
             rightPanel !== "closed"
               ? "text-parsnip-teal hover:bg-navy-800"
               : "text-parsnip-muted hover:text-parsnip-text hover:bg-navy-800"
           }`}
-          title={`Right panel: ${rightPanel}`}
+          label={`Right panel: ${rightPanel}`}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="3" y="3" width="18" height="18" rx="2" />
             <line x1="15" y1="3" x2="15" y2="21" />
           </svg>
-        </button>
+        </PanelIconButton>
 
         <div className="w-px h-4 bg-navy-600 mx-1" />
 

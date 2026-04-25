@@ -2,12 +2,15 @@ import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import { persist } from "zustand/middleware";
 
-export type LeftPanelType = "threads" | "memories" | "kb" | "notes" | "closed";
+export type LeftPanelType = "threads" | "memories" | "notes" | "closed";
 export type RightPanelType = "stats" | "outputs" | "note" | "closed";
+export type CenterView = "thread" | "notebook" | "welcome";
 
 interface PanelState {
   leftPanel: LeftPanelType;
   rightPanel: RightPanelType;
+  centerView: CenterView;
+  previousCenterView: CenterView;
   previousLeftPanel: LeftPanelType;
   previousRightPanel: RightPanelType;
   leftPanelWidth: number;
@@ -17,6 +20,7 @@ interface PanelState {
 interface PanelActions {
   setLeftPanel: (panel: LeftPanelType) => void;
   setRightPanel: (panel: RightPanelType) => void;
+  setCenterView: (view: CenterView) => void;
   setLeftPanelWidth: (width: number) => void;
   setRightPanelWidth: (width: number) => void;
   toggleLeftCollapsed: () => void;
@@ -34,6 +38,8 @@ export const usePanelStore = create<PanelStore>()(
       (set, get) => ({
         leftPanel: "threads",
         rightPanel: "closed",
+        centerView: "thread",
+        previousCenterView: "thread" as CenterView,
         previousLeftPanel: "threads" as LeftPanelType,
         previousRightPanel: "stats" as RightPanelType,
         leftPanelWidth: DEFAULT_LEFT_WIDTH,
@@ -53,6 +59,10 @@ export const usePanelStore = create<PanelStore>()(
           } else {
             set({ rightPanel: panel, previousRightPanel: panel });
           }
+        },
+
+        setCenterView: (view: CenterView) => {
+          set({ previousCenterView: get().centerView, centerView: view });
         },
 
         setLeftPanelWidth: (width: number) => {
@@ -83,7 +93,7 @@ export const usePanelStore = create<PanelStore>()(
       }),
       {
         name: "panel-store",
-        partialize: (state) => ({ leftPanelWidth: state.leftPanelWidth, rightPanelWidth: state.rightPanelWidth }),
+        partialize: (state) => ({ leftPanelWidth: state.leftPanelWidth, rightPanelWidth: state.rightPanelWidth, centerView: state.centerView }),
       }
     )
   )
@@ -91,5 +101,7 @@ export const usePanelStore = create<PanelStore>()(
 
 export const selectLeftPanel = (state: PanelStore) => state.leftPanel;
 export const selectRightPanel = (state: PanelStore) => state.rightPanel;
+export const selectCenterView = (state: PanelStore) => state.centerView;
+export const selectPreviousCenterView = (state: PanelStore) => state.previousCenterView;
 export const selectLeftPanelWidth = (state: PanelStore) => state.leftPanelWidth;
 export const selectRightPanelWidth = (state: PanelStore) => state.rightPanelWidth;

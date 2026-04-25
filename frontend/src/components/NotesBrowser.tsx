@@ -11,10 +11,16 @@ import {
   selectSearchQuery,
 } from "../stores/note-store";
 import type { NoteSummary } from "../stores/note-store";
+import { useThreadStore, selectCurrentThreadId } from "../stores/thread-store";
 import { usePanelStore } from "../stores/panel-store";
 import { EmptyState } from "./ui/EmptyState";
 import { ErrorBanner } from "./ui/ErrorBanner";
 import { LoadingSkeleton } from "./ui/LoadingSkeleton";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { NativeSelect } from "./ui/native-select";
+import { PanelActions, PanelHeader, PanelIconButton, PanelTitle } from "./ui/panel";
 
 function formatTime(iso: string | null) {
   if (!iso) return "";
@@ -42,6 +48,8 @@ export function NotesBrowser() {
   const notebooks = useNoteStore(selectNotebooks);
   const notebookFilter = useNoteStore(selectNotebookFilter);
   const searchQuery = useNoteStore(selectSearchQuery);
+  const currentThreadId = useThreadStore(selectCurrentThreadId);
+  const threads = useThreadStore((s) => s.threads);
 
   const loadNotes = useNoteStore((s) => s.loadNotes);
   const loadNotebooks = useNoteStore((s) => s.loadNotebooks);
@@ -52,6 +60,7 @@ export function NotesBrowser() {
   const setNotebookFilter = useNoteStore((s) => s.setNotebookFilter);
   const clearFilters = useNoteStore((s) => s.clearFilters);
   const setRightPanel = usePanelStore((s) => s.setRightPanel);
+  const setCenterView = usePanelStore((s) => s.setCenterView);
 
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -62,7 +71,7 @@ export function NotesBrowser() {
 
   useEffect(() => {
     loadNotes(notebookFilter || undefined, searchQuery || undefined);
-  }, [loadNotes, notebookFilter]);
+  }, [loadNotes, notebookFilter, currentThreadId]);
 
   useEffect(() => {
     if (!didMountSearch.current) {
@@ -98,44 +107,45 @@ export function NotesBrowser() {
 
   const handleSelectNote = (noteId: string) => {
     setCurrentNoteId(noteId);
+    setCenterView("notebook");
     setRightPanel("note");
   };
 
   const hasActiveFilters = notebookFilter || searchQuery;
+  const currentThreadTitle = currentThreadId
+    ? threads.find((t) => t.id === currentThreadId)?.title ?? "Thread"
+    : null;
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-navy-900">
-      <div className="flex items-center justify-between px-3 py-3 border-b border-navy-700">
-        <span className="text-xs font-semibold text-parsnip-muted uppercase tracking-wider">
-          Notes
-        </span>
-        <div className="flex items-center gap-1">
-          <button
+      <PanelHeader>
+        <PanelTitle>Notes</PanelTitle>
+        <PanelActions>
+          <PanelIconButton
             onClick={handleNewNote}
             disabled={isCreating}
-            className="text-parsnip-teal hover:text-parsnip-teal/80 transition-colors p-1 rounded disabled:opacity-50"
-            title="New note"
+            className="text-primary"
+            label="New note"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
-          </button>
-          <button
+          </PanelIconButton>
+          <PanelIconButton
             onClick={() => {
               loadNotes(notebookFilter || undefined, searchQuery || undefined);
               loadNotebooks();
             }}
-            className="text-parsnip-muted hover:text-parsnip-teal transition-colors p-1 rounded"
-            title="Refresh"
+            label="Refresh notes"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 12a9 9 0 1 1-6.219-8.56" />
               <polyline points="21,3 21,9 15,9" />
             </svg>
-          </button>
-        </div>
-      </div>
+          </PanelIconButton>
+        </PanelActions>
+      </PanelHeader>
 
       <div className="px-3 py-2 border-b border-navy-700">
         <div className="relative">
@@ -153,22 +163,22 @@ export function NotesBrowser() {
             <circle cx="11" cy="11" r="8" />
             <line x1="21" y1="21" x2="16.65" y2="16.65" />
           </svg>
-          <input
+          <Input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search notes..."
-            className="w-full bg-navy-800 border border-navy-700 rounded pl-8 pr-3 py-1.5 text-sm text-parsnip-text placeholder:text-parsnip-muted focus:outline-none focus:border-parsnip-teal transition-colors"
+            className="h-8 bg-navy-800 pl-8"
           />
         </div>
       </div>
 
       {notebooks.length > 0 && (
         <div className="px-3 py-2 border-b border-navy-700">
-          <select
+          <NativeSelect
             value={notebookFilter}
             onChange={(e) => setNotebookFilter(e.target.value)}
-            className="w-full bg-navy-800 border border-navy-700 rounded text-sm text-parsnip-text px-2 py-1.5 focus:outline-none focus:border-parsnip-teal transition-colors"
+            className="h-8 bg-navy-800"
           >
             <option value="">All notebooks</option>
             {notebooks.map((nb) => (
@@ -176,21 +186,31 @@ export function NotesBrowser() {
                 {nb.title} ({nb.note_count})
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </div>
       )}
 
+      <div className="px-3 py-1.5 border-b border-navy-800 flex items-center gap-1.5">
+        <Badge variant={currentThreadId ? "default" : "muted"} className="max-w-full truncate text-[10px]">
+          {currentThreadTitle
+            ? `Thread: ${currentThreadTitle}`
+            : "All threads"}
+        </Badge>
+      </div>
+
       {hasActiveFilters && (
         <div className="px-3 py-1.5 border-b border-navy-700">
-          <button
+          <Button
             onClick={() => {
               clearFilters();
               loadNotes(undefined, undefined);
             }}
-            className="text-[10px] text-parsnip-muted hover:text-parsnip-teal transition-colors"
+            variant="link"
+            size="xs"
+            className="h-auto p-0 text-[10px] text-muted-foreground"
           >
             Clear filters
-          </button>
+          </Button>
         </div>
       )}
 
@@ -265,19 +285,21 @@ export function NotesBrowser() {
                 {note.title || "Untitled"}
               </p>
               {hoveredId === note.id && (
-                <button
+                <Button
                   onClick={(e) => {
                     e.stopPropagation();
                     handleDelete(note.id);
                   }}
-                  className="shrink-0 text-parsnip-muted hover:text-red-400 transition-colors p-0.5 rounded"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="h-5 w-5 shrink-0 text-muted-foreground hover:text-destructive"
                   title="Delete note"
                 >
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="3,6 5,6 21,6" />
                     <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                   </svg>
-                </button>
+                </Button>
               )}
             </div>
 
@@ -289,12 +311,13 @@ export function NotesBrowser() {
 
             <div className="flex items-center gap-1.5 mt-1 flex-wrap">
               {note.tags.slice(0, 3).map((tag) => (
-                <span
+                <Badge
                   key={tag}
-                  className="text-[10px] px-1.5 py-0.5 rounded bg-navy-700 text-parsnip-teal"
+                  variant="default"
+                  className="px-1.5 py-0 text-[10px]"
                 >
                   {tag}
-                </span>
+                </Badge>
               ))}
               {note.tags.length > 3 && (
                 <span className="text-[10px] text-parsnip-muted">

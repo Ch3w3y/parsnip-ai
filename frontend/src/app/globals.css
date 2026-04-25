@@ -14,6 +14,29 @@
   --parsnip-teal: #23c0a8;
   --parsnip-blue: #2f6cff;
 
+  /* shadcn/ui semantic tokens mapped onto the Parsnip dark palette.
+     Keep these as HSL channels for Tailwind opacity modifiers. */
+  --radius: 0.625rem;
+  --background: 224 41% 7%;
+  --foreground: 225 100% 98%;
+  --card: 219 32% 16%;
+  --card-foreground: 225 100% 98%;
+  --popover: 224 41% 7%;
+  --popover-foreground: 225 100% 98%;
+  --primary: 172 69% 45%;
+  --primary-foreground: 224 41% 7%;
+  --secondary: 219 29% 21%;
+  --secondary-foreground: 225 100% 98%;
+  --muted: 219 29% 21%;
+  --muted-foreground: 208 37% 70%;
+  --accent: 219 29% 21%;
+  --accent-foreground: 225 100% 98%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 216 27% 24%;
+  --input: 216 27% 24%;
+  --ring: 172 69% 45%;
+
   /* Semantic aliases for assistant-ui overrides */
   --aui-bg-primary: var(--parsnip-navy);
   --aui-bg-secondary: var(--parsnip-navy-800);
