@@ -5,10 +5,15 @@
 
 services:
 
-  # ── PostgreSQL with pgvector + pgvectorscale (DiskANN) ─────────────────────
+  # ── PostgreSQL + pgvector + pgvectorscale (DiskANN) + pgBackRest ───────────
+  # Custom image extends timescale/timescaledb-ha to co-locate pgbackrest so
+  # archive_command can invoke it directly (no SSH/TLS sidecar). Cron in the
+  # same container drives scheduled full/diff backups to GCS.
   postgres:
-    # Pinned to tested digest — update only after verifying new image
-    image: timescale/timescaledb-ha:pg16@sha256:b3d038d0a0757df8a5ec0a94ba68d9ad57b0e16100a024cf4b370c77ad5645f7
+    build:
+      context: ./infra/postgres
+      dockerfile: Dockerfile
+    image: ghcr.io/ch3w3y/parsnip-ai/postgres:${IMAGE_TAG:-latest}
     container_name: pi_agent_postgres
     restart: unless-stopped
     networks:
@@ -19,12 +24,31 @@ services:
       POSTGRES_USER: agent
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: agent_kb
+      GCS_BUCKET: ${GCS_BUCKET:-}
+    # WAL archiving config for pgBackRest. wal_level=replica REQUIRES a postgres
+    # restart to take effect — see docs/BACKUP_RUNBOOK.md.
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=pgbackrest --stanza=parsnip archive-push %p
+      - -c
+      - archive_timeout=300
+      - -c
+      - max_wal_senders=3
+      - -c
+      - wal_keep_size=1024
     volumes:
       # CRITICAL: timescale/timescaledb-ha uses PGDATA=/home/postgres/pgdata/data,
       # NOT /var/lib/postgresql/data. Mounting to the wrong path causes total
       # data loss on container recreation.
       - pgdata:/home/postgres/pgdata/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+      # GCS credentials for pgbackrest (read-only inside container)
+      - ./gcs-key.json:/etc/pgbackrest/gcs-key.json:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U agent -d agent_kb"]
       interval: 10s
@@ -249,6 +273,18 @@ services:
       - pi_agent_net
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes:
+      - ./gcs-key.json:/app/gcs-key.json:ro
+      - ./ingestion/data:/app/ingestion/data
+      - .:/app/project_root:ro
+      # Mount target volumes RO for sync_volumes.py to back them up to GCS.
+      # RO is sufficient: backup is read-only by definition.
+      - analysis_output:/app/volumes/analysis_output:ro
+      - owui_data:/app/volumes/owui_data:ro
+      - pipelines_data:/app/volumes/pipelines_data:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgresql://agent:${POSTGRES_PASSWORD}@pi_agent_postgres:5432/agent_kb
       JOPLIN_DATABASE_URL: postgresql://agent:${POSTGRES_PASSWORD}@pi_agent_postgres:5432/joplin
@@ -261,13 +297,7 @@ services:
       GCS_BUCKET: ${GCS_BUCKET:-}
       GCS_PROJECT_ID: ${GCS_PROJECT_ID:-agentic-storage}
       GOOGLE_APPLICATION_CREDENTIALS: /app/gcs-key.json
-    volumes:
-      - ./gcs-key.json:/app/gcs-key.json:ro
-      - ./ingestion/data:/app/ingestion/data
-      - .:/app/project_root:ro
-    depends_on:
-      postgres:
-        condition: service_healthy
+      AGE_RECIPIENT: ${AGE_RECIPIENT:-}
 
   # ── OpenWebUI ───────────────────────────────────────────────────────────────
   openwebui:

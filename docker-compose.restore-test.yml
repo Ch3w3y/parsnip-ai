@@ -1,0 +1,56 @@
+# Sandbox compose for restore drills. Inherits the production Dockerfiles
+# but uses isolated ports + volumes so it can run alongside the live stack
+# without conflict.
+#
+# Use via:
+#   docker compose -p parsnip-restore-test -f docker-compose.restore-test.yml up -d
+#
+# Tear down (also wipes test data — that's the point):
+#   docker compose -p parsnip-restore-test -f docker-compose.restore-test.yml down -v
+
+services:
+  postgres:
+    build:
+      context: ./infra/postgres
+      dockerfile: Dockerfile
+    image: ghcr.io/ch3w3y/parsnip-ai/postgres:${IMAGE_TAG:-latest}
+    container_name: parsnip_restore_postgres
+    networks:
+      - restore_net
+    ports:
+      - "15432:5432"
+    environment:
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: agent_kb
+      GCS_BUCKET: ${GCS_BUCKET:-}
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=pgbackrest --stanza=parsnip archive-push %p
+      - -c
+      - archive_timeout=300
+    volumes:
+      - pgdata_restore:/home/postgres/pgdata/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+      - ./gcs-key.json:/etc/pgbackrest/gcs-key.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent -d agent_kb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    shm_size: "256mb"
+
+volumes:
+  pgdata_restore:
+  analysis_output_restore:
+  owui_data_restore:
+  pipelines_data_restore:
+
+networks:
+  restore_net:
+    driver: bridge

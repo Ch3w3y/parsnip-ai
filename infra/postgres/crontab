@@ -1,0 +1,14 @@
+# pgBackRest schedule (UTC). User column required for /etc/cron.d/* (system cron).
+# Output to PID 1's stdout so Docker captures it via the container's log driver.
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+MAILTO=
+
+# Sunday 03:00 — full backup (base reference for the week)
+0 3 * * 0 postgres pgbackrest --stanza=parsnip --type=full backup 2>&1 | tee -a /proc/1/fd/1
+# Monday-Saturday 03:00 — diff backup (only changed pages since last full)
+0 3 * * 1-6 postgres pgbackrest --stanza=parsnip --type=diff backup 2>&1 | tee -a /proc/1/fd/1
+# Monday 04:00 — expire old backups + WAL according to repo1-retention-full
+0 4 * * 1 postgres pgbackrest --stanza=parsnip expire 2>&1 | tee -a /proc/1/fd/1
+# Every 6h — health check, surfaces stanza state to stdout
+0 */6 * * * postgres pgbackrest --stanza=parsnip info 2>&1 | tee -a /proc/1/fd/1

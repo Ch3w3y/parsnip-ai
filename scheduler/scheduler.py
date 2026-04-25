@@ -187,48 +187,56 @@ async def _run_joplin_watcher():
         logger.error(f"Joplin watcher crashed: {e}", exc_info=True)
 
 
-async def run_backup():
-    """Run knowledge base and Joplin DB backup to GCS."""
+def _run_script(name: str, script: str, *args: str, timeout: int = 3600) -> bool:
+    """Run a backup script as a subprocess. Returns True on success."""
     import subprocess
-    logger.info("Running KB backup to GCS…")
+    cmd = [sys.executable, str(Path(__file__).parent / "scripts" / script), *args]
+    logger.info(f"Running {name}: {' '.join(cmd)}")
     try:
-        # Increased timeout to 1h for large KB
-        result = subprocess.run(
-            [sys.executable, str(Path(__file__).parent / "scripts" / "backup_kb.py")],
-            capture_output=True, text=True, timeout=3600,
-        )
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         if result.returncode == 0:
-            logger.info("KB backup completed successfully.")
-        else:
-            logger.error(f"KB backup failed: {result.stderr[-500:]}")
+            logger.info(f"{name} completed successfully.")
+            return True
+        logger.error(f"{name} failed (exit {result.returncode}): {result.stderr[-800:]}")
+        return False
+    except subprocess.TimeoutExpired:
+        logger.error(f"{name} timed out after {timeout}s.")
+        return False
     except Exception as e:
-        logger.error(f"KB backup error: {e}")
+        logger.error(f"{name} error: {e}")
+        return False
+
+
+async def run_backup_incremental():
+    """Hourly incremental Parquet backup of KB tables to GCS."""
+    _run_script("KB incremental backup", "backup_kb.py", "--mode", "incremental",
+                timeout=1800)
+
+
+async def run_backup_full():
+    """Weekly full Parquet snapshot. Restore-canonical reference."""
+    _run_script("KB full snapshot", "backup_kb.py", "--mode", "full",
+                timeout=14400)
 
 
 async def run_config_backup():
-    """Run project configuration and code backup to GCS."""
-    import subprocess
-    logger.info("Running config backup to GCS…")
-    try:
-        result = subprocess.run(
-            [sys.executable, str(Path(__file__).parent / "scripts" / "backup_config.py")],
-            capture_output=True, text=True, timeout=300,
-        )
-        if result.returncode == 0:
-            logger.info("Config backup completed successfully.")
-        else:
-            logger.error(f"Config backup failed: {result.stderr[-500:]}")
-    except Exception as e:
-        logger.error(f"Config backup error: {e}")
+    """Project config + age-encrypted secrets bundle to GCS."""
+    _run_script("Config backup", "backup_config.py", timeout=600)
+
+
+async def run_volume_sync():
+    """Sync analysis_output / owui_data / pipelines_data to GCS."""
+    _run_script("Volume sync", "sync_volumes.py", timeout=3600)
 
 
 async def main():
     scheduler = AsyncIOScheduler()
 
-    # Run initial backups on startup
+    # Run initial backups on startup — config first so a fresh deploy lands
+    # the docker-compose + secrets bundle before any KB rows are produced.
     logger.info("Running initial backups…")
     await run_config_backup()
-    await run_backup()
+    await run_backup_incremental()
 
     # Recover stuck jobs before starting the scheduler
     try:
@@ -256,17 +264,26 @@ async def main():
     # Safety fallback: run every 6h in case watcher misses something
     scheduler.add_job(run_joplin, CronTrigger(hour="*/6"), id="joplin_safety")
 
-    # KB backups 4x daily: 02:00, 08:00, 14:00, 20:00 UTC
-    scheduler.add_job(run_backup, CronTrigger(hour="2,8,14,20", minute=0), id="kb_backup")
-    
-    # Config backup: daily at 01:00 UTC
+    # KB backups: hourly incremental + weekly full Sunday 02:30 UTC
+    # (Sunday 02:30 lands BEFORE pgbackrest's Sunday 03:00 full so both reference
+    # the same approximate state.)
+    scheduler.add_job(run_backup_incremental, CronTrigger(minute=15), id="kb_incremental")
+    scheduler.add_job(run_backup_full, CronTrigger(day_of_week="sun", hour=2, minute=30),
+                      id="kb_full")
+
+    # Volume sync: daily at 04:30 UTC (after pgbackrest expire window)
+    scheduler.add_job(run_volume_sync, CronTrigger(hour=4, minute=30), id="volume_sync")
+
+    # Config backup: daily at 01:00 UTC + weekly Sunday with full snapshot
     scheduler.add_job(run_config_backup, CronTrigger(hour=1, minute=0), id="config_backup")
 
     scheduler.start()
     logger.info(
         "Scheduler started. Jobs: news=daily@06:00 | arxiv=Mon@03:00 | "
         "biorxiv=Tue@03:00 | wikipedia=Sun@02:00 | forex=daily@07:00 | "
-        "world_bank=Sun@04:00 | joplin_safety=every 6h | backup_kb=4x daily | backup_config=daily@01:00"
+        "world_bank=Sun@04:00 | joplin_safety=every 6h | "
+        "kb_incremental=hourly@:15 | kb_full=Sun@02:30 | "
+        "volume_sync=daily@04:30 | config_backup=daily@01:00"
     )
     logger.info(
         "Wikipedia updates are gated — will not run until dump seed is marked done in ingestion_jobs."

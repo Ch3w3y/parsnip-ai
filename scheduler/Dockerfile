@@ -2,6 +2,11 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
+# age (for encrypting backup secrets) and curl (for installing gcloud)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends age curl ca-certificates gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install uv
 
 # Install ingestion deps + APScheduler
