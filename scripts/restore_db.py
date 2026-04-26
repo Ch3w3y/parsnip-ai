@@ -73,8 +73,8 @@ def embed_batch_sync(texts: list[str], retries: int = 3) -> list[list[float]] | 
 
 UPSERT_SQL = """
     INSERT INTO knowledge_chunks
-        (source, source_id, chunk_index, content, metadata, embedding, created_at)
-    VALUES (%s, %s, %s, %s, %s, %s, %s)
+        (source, source_id, chunk_index, content, metadata, embedding, embedding_model, created_at)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
     ON CONFLICT (source, source_id, chunk_index) DO NOTHING
 """
 
@@ -102,6 +102,12 @@ def restore_file(path: Path, conn, dry_run: bool, no_reembed: bool, throttle: Ba
     metadatas    = table["metadata"].to_pylist()
     created_ats  = table["created_at"].to_pylist()
     embeddings   = table["embedding"].to_pylist() if has_embeddings else None
+    # Check if embedding_model column exists in backup, otherwise use default
+    has_embedding_model = "embedding_model" in col_names
+    if has_embedding_model:
+        embedding_models = table["embedding_model"].to_pylist()
+    else:
+        embedding_models = ["mxbai-embed-large"] * total
 
     inserted = 0
     skipped  = 0
@@ -140,15 +146,16 @@ def restore_file(path: Path, conn, dry_run: bool, no_reembed: bool, throttle: Ba
                 try:
                     result = conn.execute(
                         UPSERT_SQL,
-                        (
-                            sources[idx],
-                            source_ids[idx],
-                            chunk_idxs[idx],
-                            batch_contents[i],
-                            psycopg.types.json.Jsonb(meta),
-                            batch_embs[i],
-                            created_ats[idx],
-                        ),
+                         (
+                             sources[idx],
+                             source_ids[idx],
+                             chunk_idxs[idx],
+                             batch_contents[i],
+                             psycopg.types.json.Jsonb(meta),
+                             batch_embs[i],
+                             embedding_models[idx],
+                             created_ats[idx],
+                         ),
                     )
                     if result.rowcount > 0:
                         inserted += 1

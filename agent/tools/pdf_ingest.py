@@ -88,17 +88,18 @@ async def ingest_pdf(filename: str, file_bytes: bytes) -> dict:
                 result = await conn.execute(
                     """
                     INSERT INTO knowledge_chunks
-                        (source, source_id, chunk_index, content, metadata, embedding)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                        (source, source_id, chunk_index, content, metadata, embedding, embedding_model)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (source, source_id, chunk_index)
                     DO UPDATE SET
-                        content    = EXCLUDED.content,
-                        embedding  = EXCLUDED.embedding,
-                        metadata   = EXCLUDED.metadata,
-                        updated_at = NOW()
+                        content         = EXCLUDED.content,
+                        embedding       = EXCLUDED.embedding,
+                        embedding_model = EXCLUDED.embedding_model,
+                        metadata        = EXCLUDED.metadata,
+                        updated_at      = NOW()
                     """,
                     ("user_docs", source_id, idx, chunk,
-                     psycopg.types.json.Jsonb(metadata), emb),
+                     psycopg.types.json.Jsonb(metadata), emb, "mxbai-embed-large"),
                 )
                 if result.rowcount > 0:
                     inserted += 1

@@ -15,6 +15,7 @@ Usage:
 
 import argparse
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -244,7 +245,7 @@ async def process_articles(articles: list[dict], conn, job_id: int) -> int:
         chunks = chunk_text(full_text, 300, 40)
 
         link = article.get("link", "")
-        source_id = f"rss_{hash(link or title)}"
+        source_id = f"rss_{hashlib.sha256((link or title).encode('utf-8'), usedforsecurity=False).hexdigest()[:16]}"
         metadata = {
             "title": title,
             "link": link,

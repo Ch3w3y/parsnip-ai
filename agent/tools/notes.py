@@ -38,13 +38,14 @@ async def save_note(title: str, content: str) -> str:
                 await conn.execute(
                     """
                     INSERT INTO knowledge_chunks
-                        (source, source_id, chunk_index, content, metadata, embedding)
-                    VALUES (%s, %s, 0, %s, %s, %s)
+                        (source, source_id, chunk_index, content, metadata, embedding, embedding_model)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (source, source_id, chunk_index)
                     DO UPDATE SET
-                        content    = EXCLUDED.content,
-                        embedding  = EXCLUDED.embedding,
-                        updated_at = NOW()
+                        content         = EXCLUDED.content,
+                        embedding       = EXCLUDED.embedding,
+                        embedding_model = EXCLUDED.embedding_model,
+                        updated_at      = NOW()
                     """,
                     (
                         "user_notes",
@@ -52,6 +53,7 @@ async def save_note(title: str, content: str) -> str:
                         f"{title}\n\n{content}",
                         psycopg.types.json.Jsonb({"title": title, "saved_at": timestamp}),
                         embedding,
+                        "mxbai-embed-large",
                     ),
                 )
     except Exception as e:

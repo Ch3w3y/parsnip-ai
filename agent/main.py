@@ -1240,16 +1240,17 @@ async def create_note(req: NoteCreate) -> dict:
                 await conn.execute(
                     """
                     INSERT INTO knowledge_chunks
-                        (source, source_id, chunk_index, content, metadata, embedding)
-                    VALUES (%s, %s, 0, %s, %s, %s)
+                        (source, source_id, chunk_index, content, metadata, embedding, embedding_model)
+                    VALUES (%s, %s, 0, %s, %s, %s, %s)
                     ON CONFLICT (source, source_id, chunk_index)
                     DO UPDATE SET
-                        content    = EXCLUDED.content,
-                        metadata   = EXCLUDED.metadata,
-                        embedding  = EXCLUDED.embedding,
-                        updated_at = NOW()
+                        content         = EXCLUDED.content,
+                        metadata        = EXCLUDED.metadata,
+                        embedding       = EXCLUDED.embedding,
+                        embedding_model = EXCLUDED.embedding_model,
+                        updated_at      = NOW()
                     """,
-                    ("user_notes", source_id, combined, Jsonb(meta), embedding),
+                    ("user_notes", source_id, combined, Jsonb(meta), embedding, "mxbai-embed-large"),
                 )
     except Exception as exc:
         logger.warning("KB index upsert failed for new note %s: %s", note_id, exc)
@@ -1367,16 +1368,17 @@ async def update_note(note_id: str, req: NoteUpdate) -> dict:
                     await conn.execute(
                         """
                         INSERT INTO knowledge_chunks
-                            (source, source_id, chunk_index, content, metadata, embedding)
-                        VALUES (%s, %s, 0, %s, %s, %s)
+                            (source, source_id, chunk_index, content, metadata, embedding, embedding_model)
+                        VALUES (%s, %s, 0, %s, %s, %s, %s)
                         ON CONFLICT (source, source_id, chunk_index)
                         DO UPDATE SET
-                            content    = EXCLUDED.content,
-                            metadata   = EXCLUDED.metadata,
-                            embedding  = EXCLUDED.embedding,
-                            updated_at = NOW()
+                            content         = EXCLUDED.content,
+                            metadata        = EXCLUDED.metadata,
+                            embedding       = EXCLUDED.embedding,
+                            embedding_model = EXCLUDED.embedding_model,
+                            updated_at      = NOW()
                         """,
-                        ("user_notes", source_id, combined, Jsonb(meta), embedding),
+                        ("user_notes", source_id, combined, Jsonb(meta), embedding, "mxbai-embed-large"),
                     )
         except Exception as exc:
             logger.warning("KB index upsert failed for note %s: %s", note_id, exc)
@@ -1667,16 +1669,17 @@ async def publish_hitl_review(note_id: str, req: HitlPublish) -> dict:
                 await conn.execute(
                     """
                     INSERT INTO knowledge_chunks
-                        (source, source_id, chunk_index, content, metadata, embedding)
-                    VALUES (%s, %s, 0, %s, %s, %s)
+                        (source, source_id, chunk_index, content, metadata, embedding, embedding_model)
+                    VALUES (%s, %s, 0, %s, %s, %s, %s)
                     ON CONFLICT (source, source_id, chunk_index)
                     DO UPDATE SET
-                        content    = EXCLUDED.content,
-                        metadata   = EXCLUDED.metadata,
-                        embedding  = EXCLUDED.embedding,
-                        updated_at = NOW()
+                        content         = EXCLUDED.content,
+                        metadata        = EXCLUDED.metadata,
+                        embedding       = EXCLUDED.embedding,
+                        embedding_model = EXCLUDED.embedding_model,
+                        updated_at      = NOW()
                     """,
-                    ("user_notes", source_id, combined, Jsonb(meta), embedding),
+                    ("user_notes", source_id, combined, Jsonb(meta), embedding, "mxbai-embed-large"),
                 )
     except Exception as exc:
         logger.warning("KB index upsert failed for published note %s: %s", note_id, exc)

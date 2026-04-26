@@ -327,14 +327,15 @@ async def main_async(full: bool = False, user_id_override: str | None = None):
                         await conn.execute(
                             """
                             INSERT INTO knowledge_chunks
-                                (source, source_id, chunk_index, content, metadata, embedding, user_id)
-                            VALUES ('joplin_notes', %s, %s, %s, %s, %s, %s)
+                                (source, source_id, chunk_index, content, metadata, embedding, embedding_model, user_id)
+                            VALUES ('joplin_notes', %s, %s, %s, %s, %s, %s, %s)
                             ON CONFLICT (source, source_id, chunk_index) DO UPDATE SET
-                                content    = EXCLUDED.content,
-                                embedding  = EXCLUDED.embedding,
-                                metadata   = EXCLUDED.metadata,
-                                user_id    = EXCLUDED.user_id,
-                                updated_at = NOW()
+                                content         = EXCLUDED.content,
+                                embedding       = EXCLUDED.embedding,
+                                embedding_model = EXCLUDED.embedding_model,
+                                metadata        = EXCLUDED.metadata,
+                                user_id         = EXCLUDED.user_id,
+                                updated_at      = NOW()
                             """,
                             (
                                 note_id,
@@ -342,6 +343,7 @@ async def main_async(full: bool = False, user_id_override: str | None = None):
                                 chunk,
                                 psycopg.types.json.Jsonb(metadata),
                                 emb,
+                                "mxbai-embed-large",
                                 kb_user_id,
                             ),
                         )

@@ -13,6 +13,7 @@ Usage:
 
 import argparse
 import asyncio
+import hashlib
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -197,7 +198,7 @@ async def process_papers(papers: list[dict], conn, job_id: int) -> int:
 
         link = paper.get("link", "")
         openalex_id = paper.get("openalex_id", "")
-        source_id = openalex_id if openalex_id else f"openalex_{hash(title)}"
+        source_id = openalex_id if openalex_id else f"openalex_{hashlib.sha256(title.encode("utf-8"), usedforsecurity=False).hexdigest()[:16]}"
 
         metadata = {
             "title": title,

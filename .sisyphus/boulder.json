@@ -1,0 +1,10 @@
+{
+  "active_plan": null,
+  "completed_plan": "/home/daryn/parsnip/.sisyphus/plans/ingestion-review.md",
+  "started_at": "2026-04-25T21:51:00Z",
+  "completed_at": "2026-04-25T22:45:00Z",
+  "session_ids": ["ses_239690269ffekm6hiN6gdiUBDu", "ses_239690257ffeSeAakZhQMToEQ5", "ses_239690246ffewz7SGu3qSYOLa9", "ses_2395c4ccbffeP6tSNJrKn0kq7O", "ses_2395c4cb9ffeVG3EV73tPqs0U6", "ses_2395c4ca8ffemgY2GeXe5itDrB", "ses_2395c4c97ffe5d3cZCvBPg8jJV", "ses_2395c4c87ffeDKXmK6Un0HGoAC", "ses_23954be4affemUVKf8i6a3S6I0", "ses_23954be02ffeICRBWvMbo4m1Si", "ses_23954be30ffe01Jsd43Z359OWb", "ses_2394d7de6ffeLt4UJym5xygVVC", "ses_2394d7dc8ffepVQvFy9VfvjruL", "ses_2394d7dadffeYib9HslSNVU4iT", "ses_2394d7d96ffef4GFU2oMZ1lfAn", "ses_2394d7d7dffeBZtMJOvqXUexdf", "ses_2394d7d66ffeRAcgBKiwLpwlac", "ses_239482335ffe2693nDJQpUB5Xk", "ses_239482318ffeKpHYvLEr9e0IF6", "ses_2394822fcffe0nCKmlxtg3G24E"],
+  "plan_name": "ingestion-review",
+  "status": "COMPLETE",
+  "worktree_path": null
+}

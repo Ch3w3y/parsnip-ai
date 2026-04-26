@@ -175,16 +175,18 @@ async def upsert_chunks(
     embeddings: list[list[float]],
     metadata: dict,
     on_conflict: str = "update",  # "update" refreshes changed content; "nothing" skips
+    embedding_model: str = "mxbai-embed-large",
 ) -> int:
     """Insert chunks with embeddings. Returns count of rows written."""
     if on_conflict == "update":
         conflict_clause = """
             ON CONFLICT (source, source_id, chunk_index)
             DO UPDATE SET
-                content    = EXCLUDED.content,
-                embedding  = EXCLUDED.embedding,
-                metadata   = EXCLUDED.metadata,
-                updated_at = NOW()
+                content         = EXCLUDED.content,
+                embedding       = EXCLUDED.embedding,
+                embedding_model = EXCLUDED.embedding_model,
+                metadata        = EXCLUDED.metadata,
+                updated_at      = NOW()
         """
     else:
         conflict_clause = "ON CONFLICT (source, source_id, chunk_index) DO NOTHING"
@@ -196,8 +198,8 @@ async def upsert_chunks(
                 result = await conn.execute(
                     f"""
                     INSERT INTO knowledge_chunks
-                        (source, source_id, chunk_index, content, metadata, embedding)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                        (source, source_id, chunk_index, content, metadata, embedding, embedding_model)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                     {conflict_clause}
                     """,
                     (
@@ -207,8 +209,9 @@ async def upsert_chunks(
                         text,
                         psycopg.types.json.Jsonb(metadata),
                         emb,
-                    ),
-                )
+                        embedding_model,
+                     ),
+                 )
                 if result.rowcount > 0:
                     inserted += 1
         except Exception as e:
