@@ -33,6 +33,8 @@ import psycopg
 from dotenv import load_dotenv
 from pgvector.psycopg import register_vector_async
 
+from utils import cleanup_orphan_chunks
+
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -347,6 +349,8 @@ async def main_async(full: bool = False, user_id_override: str | None = None):
                                 kb_user_id,
                             ),
                         )
+
+                await cleanup_orphan_chunks(conn, "joplin_notes", note_id, len(chunks))
 
                 processed += 1
                 if processed % 25 == 0:

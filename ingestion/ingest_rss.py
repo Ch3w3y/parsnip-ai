@@ -31,6 +31,7 @@ from utils import (
     chunk_text,
     embed_batch,
     bulk_upsert_chunks,
+    cleanup_orphan_chunks,
     get_db_connection,
     create_job,
     finish_job,
@@ -214,6 +215,7 @@ async def process_articles(articles: list[dict], conn, job_id: int) -> int:
     """Phase 2: Chunk, embed, and upsert articles."""
     rows = []
     total = 0
+    source_chunk_counts: dict[str, int] = {}
 
     async def flush():
         nonlocal total
@@ -224,6 +226,7 @@ async def process_articles(articles: list[dict], conn, job_id: int) -> int:
         if embeddings is None:
             logger.error("Embedding failed, skipping batch.")
             rows.clear()
+            source_chunk_counts.clear()
             return
         good_rows = [
             row[:6] + (emb,) + row[7:]
@@ -233,6 +236,11 @@ async def process_articles(articles: list[dict], conn, job_id: int) -> int:
         if good_rows:
             await bulk_upsert_chunks(conn, good_rows, on_conflict="update")
             total += len(good_rows)
+
+        for sid, count in source_chunk_counts.items():
+            await cleanup_orphan_chunks(conn, "rss", sid, count)
+        source_chunk_counts.clear()
+
         rows.clear()
 
     for article in articles:
@@ -268,6 +276,9 @@ async def process_articles(articles: list[dict], conn, job_id: int) -> int:
 
             if len(rows) >= BATCH_SIZE:
                 await flush()
+
+        if chunks:
+            source_chunk_counts[source_id] = len(chunks)
 
     await flush()
     await update_job_progress(conn, job_id, len(articles))

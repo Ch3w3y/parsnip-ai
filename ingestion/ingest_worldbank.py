@@ -30,6 +30,7 @@ from tqdm import tqdm
 from utils import (
     embed_batch,
     bulk_upsert_chunks,
+    cleanup_orphan_chunks,
     get_db_connection,
     create_job,
     finish_job,
@@ -338,6 +339,10 @@ async def process_records(records: list[dict]):
 
             inserted = await bulk_upsert_chunks(conn, bulk_rows, on_conflict="update")
             total_kb += inserted
+
+            for chunk in pending_chunks:
+                await cleanup_orphan_chunks(conn, "world_bank", chunk["source_id"], 1)
+
             pending_texts.clear()
             pending_chunks.clear()
 

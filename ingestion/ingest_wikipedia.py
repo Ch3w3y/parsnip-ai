@@ -33,6 +33,7 @@ from utils import (
     chunk_text,
     embed_batch,
     bulk_upsert_chunks,
+    cleanup_orphan_chunks,
     get_db_connection,
     create_job,
     finish_job,
@@ -87,6 +88,8 @@ async def process_articles(wiki_dir: Path, skip: int = 0, limit: int | None = No
         # Pending batch: accumulate until BATCH_SIZE, then embed + bulk insert together
         pending_texts: list[str] = []
         pending_rows: list[tuple] = []  # (source_id, metadata_dict) per chunk
+        # Track chunk counts per source_id for orphan cleanup
+        source_chunk_counts: dict[str, int] = {}
 
         total_articles = 0
         total_chunks_inserted = 0
@@ -104,6 +107,7 @@ async def process_articles(wiki_dir: Path, skip: int = 0, limit: int | None = No
                 )
                 pending_texts.clear()
                 pending_rows.clear()
+                source_chunk_counts.clear()
                 return
 
             bulk_rows = [
@@ -123,6 +127,11 @@ async def process_articles(wiki_dir: Path, skip: int = 0, limit: int | None = No
             ]
             inserted = await bulk_upsert_chunks(conn, bulk_rows, on_conflict="update")
             total_chunks_inserted += inserted
+
+            # Clean up orphan chunks for source_ids in this batch
+            for sid, count in source_chunk_counts.items():
+                await cleanup_orphan_chunks(conn, "wikipedia", sid, count)
+            source_chunk_counts.clear()
 
             pending_texts.clear()
             pending_rows.clear()
@@ -151,13 +160,15 @@ async def process_articles(wiki_dir: Path, skip: int = 0, limit: int | None = No
                     "wiki_id": article.get("id", ""),
                 }
 
+                source_id = article["title"]
                 for idx, chunk in enumerate(chunks):
-                    source_id = article["title"]
                     pending_texts.append(chunk)
                     pending_rows.append((source_id, idx, metadata))
 
                     if len(pending_texts) >= BATCH_SIZE:
                         await flush_batch()
+
+                source_chunk_counts[source_id] = len(chunks)
 
                 total_articles += 1
                 pbar.update(1)

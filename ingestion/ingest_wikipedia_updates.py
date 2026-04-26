@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 from utils import (
     chunk_text,
     embed_batch,
-    upsert_chunks,
+    cleanup_orphan_chunks,
     get_db_connection,
     create_job,
     finish_job,
@@ -135,7 +135,6 @@ async def process_articles(articles: list[dict], conn) -> int:
             pending_meta.clear()
             return
         for text, emb, meta in zip(pending_texts, embeddings, pending_meta):
-            # Use DO UPDATE so changed articles actually get refreshed
             try:
                 async with conn.transaction():
                     await conn.execute(
@@ -161,15 +160,20 @@ async def process_articles(articles: list[dict], conn) -> int:
 
     for article in articles:
         chunks = chunk_text(article["text"])
+        source_id = article["title"]
+
         for idx, chunk in enumerate(chunks):
             pending_texts.append(chunk)
             pending_meta.append({
-                "source_id": f"{article['title']}::{idx}",
+                "source_id": source_id,
                 "chunk_idx": idx,
                 "metadata": {"url": article["url"], "wiki_id": article["wiki_id"]},
             })
             if len(pending_texts) >= BATCH_SIZE:
                 await flush()
+
+        if chunks:
+            await cleanup_orphan_chunks(conn, "wikipedia", source_id, len(chunks))
 
     await flush()
     return total_inserted

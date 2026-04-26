@@ -31,7 +31,7 @@
 - [x] **1.1b**: Update `finish_job()` in `ingestion/utils.py` to accept/write new columns
 - [x] **1.1c**: Add migration SQL for existing `ingestion_jobs` rows
 - [x] **1.2**: Fix error handling in ALL `ingest_*.py` — wrap `main_async()` in try/except/finally, call `finish_job(..., 'failed')` with error_message
-- [ ] **1.3**: Add orphan chunk cleanup for `update` sources after upsert completes
+- [x] **1.3**: Add orphan chunk cleanup for `update` sources after upsert completes
 - [ ] **1.4**: Add circuit breaker to `embed_batch()` in `ingestion/utils.py`
 - [ ] **1.5**: Add rate limiting to 4 scripts lacking it: `ingest_forex.py`, `ingest_news.py`, `ingest_rss.py`, `ingest_worldbank.py`
 

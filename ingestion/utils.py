@@ -266,6 +266,35 @@ async def bulk_upsert_chunks(
     return len(rows)
 
 
+async def cleanup_orphan_chunks(
+    conn, source: str, source_id: str, new_chunk_count: int
+) -> int:
+    """Delete chunks with chunk_index >= new_chunk_count for a given source+source_id.
+
+    When an article/document is updated and now has fewer chunks than before,
+    the old excess chunks remain orphaned in the database. This function removes
+    them to keep the knowledge base consistent.
+
+    Returns the number of deleted rows.
+    """
+    result = await conn.execute(
+        """
+        DELETE FROM knowledge_chunks
+        WHERE source = %s
+          AND source_id = %s
+          AND chunk_index >= %s
+        """,
+        (source, source_id, new_chunk_count),
+    )
+    deleted = result.rowcount
+    if deleted:
+        logger.info(
+            f"Cleaned up {deleted} orphan chunk(s) for {source}/{source_id} "
+            f"(new count: {new_chunk_count})"
+        )
+    return deleted
+
+
 async def update_job_progress(conn, job_id: int, processed: int):
     await conn.execute(
         "UPDATE ingestion_jobs SET processed = %s WHERE id = %s",

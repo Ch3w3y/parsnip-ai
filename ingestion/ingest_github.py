@@ -26,6 +26,7 @@ from utils import (
     chunk_text,
     embed_batch,
     bulk_upsert_chunks,
+    cleanup_orphan_chunks,
     get_db_connection,
     create_job,
     finish_job,
@@ -419,6 +420,7 @@ async def process_files(files: list[dict], conn, job_id: int) -> int:
     """Phase 2: Chunk, embed, and upsert files."""
     rows = []
     total = 0
+    source_chunk_counts: dict[str, int] = {}
 
     async def flush():
         nonlocal total
@@ -432,6 +434,11 @@ async def process_files(files: list[dict], conn, job_id: int) -> int:
             return
         await bulk_upsert_chunks(conn, rows, on_conflict="update")
         total += len(rows)
+
+        for sid, count in source_chunk_counts.items():
+            await cleanup_orphan_chunks(conn, "github", sid, count)
+        source_chunk_counts.clear()
+
         rows.clear()
 
     for file_rec in files:
@@ -474,6 +481,8 @@ async def process_files(files: list[dict], conn, job_id: int) -> int:
 
             if len(rows) >= BATCH_SIZE:
                 await flush()
+
+        source_chunk_counts[f"{repo}/{path}"] = len(chunks)
 
     await flush()
 
