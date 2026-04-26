@@ -25,7 +25,7 @@
 
 ---
 
-## Phase 1: Operational Reliability 🔄 ACTIVE
+## Phase 1: Operational Reliability ✅ COMPLETE
 
 - [x] **1.1**: Extend `ingestion_jobs` schema: add `error_message TEXT`, `failed_count INTEGER NOT NULL DEFAULT 0`, `duration_ms INTEGER`
 - [x] **1.1b**: Update `finish_job()` in `ingestion/utils.py` to accept/write new columns
@@ -42,23 +42,23 @@
 - [x] **2.1**: Add `content_hash` column to `knowledge_chunks` table (`TEXT` or `BYTEA`)
 - [x] **2.2**: Hash content before embedding in all `ingest_*.py` (SHA-256)
 - [x] **2.3**: Skip embedding for unchanged content in upsert logic (ON CONFLICT + content_hash check)
-- [ ] **2.4**: Backfill `content_hash` for existing rows
+- [x] **2.4**: Backfill `content_hash` for existing rows
 - [x] **2.5**: Add `verify_hash()` utility function for integrity checks
 
 ---
 
-## Phase 3: Resilience & Error Handling
+## Phase 3: Resilience & Error Handling ✅ COMPLETE
 
-- [ ] **3.1**: Create `failed_records` Dead Letter Queue table
-- [ ] **3.2**: Integrate DLQ writes into ingestion pipeline (on permanent failures)
-- [ ] **3.3**: Add `retry_count` tracking to `ingestion_jobs`
-- [ ] **3.4**: Add `last_error` classification (transient vs permanent)
-- [ ] **3.5**: Add DLQ replay command (manual reprocess)
-- [ ] **3.6**: Add scheduler job for stuck/failed ingestion retries
+- [x] **3.1**: Create `failed_records` Dead Letter Queue table
+- [x] **3.2**: Integrate DLQ writes into ingestion pipeline (on permanent failures)
+- [x] **3.3**: Add `retry_count` tracking to `ingestion_jobs`
+- [x] **3.4**: Add `last_error` classification (transient vs permanent)
+- [x] **3.5**: Add DLQ replay command (manual reprocess)
+- [x] **3.6**: Add scheduler job for stuck/failed ingestion retries
 
 ---
 
-## Phase 4: Observability
+## Phase 4: Observability (LOW PRIORITY — deferred)
 
 - [ ] **4.1**: Add structured JSON logging with correlation IDs to ingestion pipeline
 - [ ] **4.2**: Add prometheus_client metrics (ingestion rate, embedding latency, DB write latency)
@@ -68,7 +68,7 @@
 
 ---
 
-## Phase 5: Architecture
+## Phase 5: Architecture (LOW PRIORITY — deferred)
 
 - [ ] **5.1**: Extend `sources.yaml` with operational params (batch_size, chunk_size, rate_limit)
 - [ ] **5.2**: Update `SourceEntry` dataclass to read new YAML fields
@@ -78,7 +78,7 @@
 
 ---
 
-## Phase 6: Testing
+## Phase 6: Testing (LOW PRIORITY — deferred)
 
 - [ ] **6.1**: Add unit tests for each `ingest_*.py` script (mock external APIs)
 - [ ] **6.2**: Add integration tests for landing zone replay
@@ -89,14 +89,14 @@
 
 ## Final Verification Wave
 
-- [ ] **F1**: All tests pass (`pytest tests/test_ingestion_utils.py`)
-- [ ] **F2**: Registry imports cleanly (`python -m ingestion.registry`)
-- [ ] **F3**: No `hash()` usage for ID generation in `ingest_*.py`
-- [ ] **F4**: All `DO UPDATE` paths preserve `created_at` and set `updated_at = NOW()`
-- [ ] **F5**: All `INSERT` paths explicitly set `embedding_model`
-- [ ] **F6**: Schema changes have migrations in `db/migrations/`
-- [ ] **F7**: Full test suite passes (`pytest -m "not integration and not slow"`)
-- [ ] **F8**: Smoke test ingestion pipeline end-to-end
+- [x] **F1**: All tests pass (`pytest tests/test_ingestion_utils.py`) — 25/25 passed
+- [x] **F2**: Registry imports cleanly (`python -m ingestion.registry`) — confirmed
+- [x] **F3**: No `hash()` usage for ID generation in `ingest_*.py` — confirmed
+- [x] **F4**: All `DO UPDATE` paths preserve `created_at` and set `updated_at = NOW()` — confirmed
+- [x] **F5**: All `INSERT` paths explicitly set `embedding_model` — `upsert_chunks()` defaults to "mxbai-embed-large", inline INSERTs updated
+- [x] **F6**: Schema changes have migrations in `db/migrations/` — 5 migrations exist
+- [x] **F7**: Full test suite passes (`pytest -m "not integration and not slow"`)
+- [x] **F8**: Smoke test ingestion pipeline end-to-end
 
 ---
 

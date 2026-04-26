@@ -17,6 +17,11 @@ from typing import AsyncIterator, Iterator
 import httpx
 import psycopg
 from dotenv import load_dotenv
+
+try:
+    import asyncpg
+except ImportError:
+    asyncpg = None  # type: ignore[assignment]
 from pgvector.psycopg import register_vector_async
 
 load_dotenv(Path(__file__).parent.parent / ".env")
@@ -499,8 +504,8 @@ async def create_job(conn, source: str, total: int | None = None) -> int:
     row = await (
         await conn.execute(
             """
-            INSERT INTO ingestion_jobs (source, status, total, started_at)
-            VALUES (%s, 'running', %s, NOW())
+            INSERT INTO ingestion_jobs (source, status, total, retry_count, started_at)
+            VALUES (%s, 'running', %s, 0, NOW())
             RETURNING id
             """,
             (source, total),
@@ -516,13 +521,14 @@ async def finish_job(
     *,
     error_message: str | None = None,
     failed_count: int | None = None,
+    retry_count: int | None = None,
 ):
     """Mark an ingestion job as done or failed.
 
     Columns written on every call:
       - status, finished_at
     When status='failed':
-      - error_message (last error), failed_count
+      - error_message (last error), failed_count, retry_count (incremented if not passed)
     duration_ms is always computed from started_at → finished_at.
     """
     sets = ["status = %s", "finished_at = NOW()"]
@@ -539,6 +545,12 @@ async def finish_job(
     if failed_count is not None:
         sets.append("failed_count = %s")
         params.append(failed_count)
+
+    if retry_count is not None:
+        sets.append("retry_count = %s")
+        params.append(retry_count)
+    elif status == "failed":
+        sets.append("retry_count = retry_count + 1")
 
     params.append(job_id)
 
@@ -569,6 +581,57 @@ async def write_to_dlq(
             type(error).__name__,
             retry_count,
         ),
+    )
+
+
+def classify_error(exc: Exception) -> str:
+    """Classify an exception as 'transient' (retryable) or 'permanent'.
+
+    Transient: network/timeout/rate-limit errors that may succeed on retry.
+    Permanent: programming/logic/invalid-request errors that won't self-resolve.
+    """
+    # --- Transient: connection / timeout ---
+    if isinstance(exc, (ConnectionError, TimeoutError)):
+        return "transient"
+
+    try:
+        if isinstance(exc, asyncio.TimeoutError) and not isinstance(exc, TimeoutError):
+            return "transient"
+    except TypeError:
+        pass
+
+    # --- Transient: psycopg operational errors (connection dropped, etc.) ---
+    if isinstance(exc, psycopg.OperationalError):
+        return "transient"
+
+    # --- Transient: asyncpg connection errors ---
+    if asyncpg is not None and isinstance(exc, asyncpg.PostgresError):
+        # Classify connection-related asyncpg errors as transient
+        sqlstate = getattr(exc, "sqlstate", "")
+        # 08xxx = connection exception, 53xxx = insufficient resources
+        if sqlstate and (sqlstate.startswith("08") or sqlstate.startswith("53")):
+            return "transient"
+
+    # --- Transient: HTTP status errors (429 rate-limit, 503 service unavailable) ---
+    if isinstance(exc, httpx.HTTPStatusError):
+        if exc.response.status_code in (429, 503):
+            return "transient"
+        if exc.response.status_code in (400, 404):
+            return "permanent"
+
+    # --- Permanent: programming / logic errors ---
+    if isinstance(exc, (ValueError, KeyError, TypeError, AssertionError)):
+        return "permanent"
+
+    # --- Default: unknown errors treated as transient (safer to retry) ---
+    return "transient"
+
+
+async def update_job_retry_count(conn, job_id: int) -> None:
+    """Increment retry_count for an ingestion job by 1."""
+    await conn.execute(
+        "UPDATE ingestion_jobs SET retry_count = retry_count + 1 WHERE id = %s",
+        (job_id,),
     )
 
 
@@ -604,7 +667,8 @@ async def recover_stuck_jobs(conn, timeout_hours: float = None) -> int:
         SET status = 'failed',
             finished_at = NOW(),
             error_message = 'Job timed out after {timeout_hours} hours',
-            duration_ms = EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000
+            duration_ms = EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000,
+            retry_count = retry_count + 1
         WHERE status = 'running'
           AND started_at < NOW() - INTERVAL '{timeout_hours} hours'
         """

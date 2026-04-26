@@ -12,11 +12,13 @@ All ingestion sources are resolved via the SourceRegistry plugin system
 
 import asyncio
 import logging
+import random
 import sys
 from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from dotenv import load_dotenv
 
 from ingestion.registry import SourceRegistry
@@ -46,8 +48,63 @@ ARXIV_CATEGORIES = [
     "econ.GN",
 ]
 
+# --- Failed / stuck ingestion retry configuration ---
+MAX_RETRIES = 3
+RETRY_INTERVAL_MINUTES = 30       # scheduler job runs every 30 min
+STUCK_RECOVERY_INTERVAL_HOURS = 6 # aggressive stuck-job recovery every 6 hours
+FAILED_RETRY_AGE_HOURS = 1       # only retry failed jobs older than 1 hour
+STUCK_JOB_AGE_HOURS = 2          # jobs running longer than this are considered stuck
+
 # Mutex: prevent concurrent Wikipedia writes (dump seed vs incremental update)
 _wikipedia_lock = asyncio.Lock()
+
+
+def _is_transient_error(error_message: str | None) -> bool:
+    """Heuristic: classify an error_message string as transient or permanent.
+
+    Mirrors the logic in ingestion.utils.classify_error() but works on stored
+    text rather than a live Exception object. Unknown patterns default to
+    transient (safer to retry).
+    """
+    if not error_message:
+        return True  # no error info — assume transient
+
+    msg_lower = error_message.lower()
+
+    # Permanent signals
+    permanent_patterns = [
+        "valueerror",
+        "keyerror",
+        "typeerror",
+        "assertionerror",
+        "400",       # bad request
+        "404",       # not found
+    ]
+    for p in permanent_patterns:
+        if p in msg_lower:
+            return False
+
+    # Transient signals (everything else is treated as transient by default,
+    # but be explicit about the common ones)
+    transient_patterns = [
+        "connectionerror",
+        "connecterror",
+        "timeout",
+        "timed out",
+        "429",         # rate limit
+        "503",         # service unavailable
+        "operationalerror",
+        "connection",
+        "refused",
+        "reset",
+        "unreachable",
+    ]
+    for p in transient_patterns:
+        if p in msg_lower:
+            return True
+
+    # Default: unknown errors treated as transient (safer to retry)
+    return True
 
 
 async def wikipedia_seed_complete() -> bool:
@@ -229,6 +286,135 @@ async def run_volume_sync():
     _run_script("Volume sync", "sync_volumes.py", timeout=3600)
 
 
+async def recover_stuck_jobs_wrapper():
+    """Periodic stuck-job recovery (wrapper for recover_stuck_jobs that manages the DB connection)."""
+    try:
+        conn = await get_db_connection()
+        recovered = await recover_stuck_jobs(conn, timeout_hours=STUCK_JOB_AGE_HOURS)
+        if recovered > 0:
+            logger.warning(f"Periodic recovery: {recovered} stuck ingestion job(s)")
+        else:
+            logger.info("Periodic recovery: no stuck ingestion jobs found")
+        await conn.close()
+    except Exception as e:
+        logger.warning(f"Periodic stuck-job recovery failed: {e}")
+
+
+async def run_failed_retries():
+    """Retry failed ingestion jobs (transient errors, retry_count < 3) and stuck running jobs.
+
+    Two categories are picked up:
+      1. Failed jobs where error is transient and retry_count < MAX_RETRIES,
+         and finished_at is older than FAILED_RETRY_AGE_HOURS.
+      2. Running jobs where started_at is older than STUCK_JOB_AGE_HOURS
+         (treated as stuck — first recovered, then re-dispatched).
+    """
+    conn = None
+    try:
+        conn = await get_db_connection()
+
+        failed_rows = await (
+            await conn.execute(
+                """
+                SELECT id, source, retry_count, error_message
+                FROM ingestion_jobs
+                WHERE status = 'failed'
+                  AND retry_count < %s
+                  AND finished_at < NOW() - INTERVAL '1 hour'
+                ORDER BY finished_at ASC
+                """,
+                (MAX_RETRIES,),
+            )
+        ).fetchall()
+
+        transient_failed = [
+            row for row in failed_rows if _is_transient_error(row[3])
+        ]
+
+        stuck_rows = await (
+            await conn.execute(
+                """
+                SELECT id, source, started_at
+                FROM ingestion_jobs
+                WHERE status = 'running'
+                  AND started_at < NOW() - INTERVAL '2 hours'
+                ORDER BY started_at ASC
+                """
+            )
+        ).fetchall()
+
+        if not transient_failed and not stuck_rows:
+            logger.info("No failed/stuck ingestion jobs to retry")
+            await conn.close()
+            return
+
+        logger.info(
+            f"Retry scan: {len(transient_failed)} transient-failed, "
+            f"{len(stuck_rows)} stuck running jobs"
+        )
+
+        for job_id, source, retry_count, error_message in transient_failed:
+            await conn.execute(
+                "UPDATE ingestion_jobs SET retry_count = retry_count + 1 WHERE id = %s",
+                (job_id,),
+            )
+            await conn.close()
+            conn = None
+
+            jitter = random.uniform(0, 5)
+            logger.info(
+                f"Retrying failed job id={job_id} source={source} "
+                f"(retry {retry_count + 1}/{MAX_RETRIES}, "
+                f"error={error_message!r:.80}, jitter={jitter:.1f}s)"
+            )
+            await asyncio.sleep(jitter)
+            try:
+                await run_source(registry, source)
+                logger.info(f"Retry succeeded: job id={job_id} source={source}")
+            except Exception as e:
+                logger.error(
+                    f"Retry failed: job id={job_id} source={source}: {e}",
+                    exc_info=True,
+                )
+
+            conn = await get_db_connection()
+
+        for job_id, source, started_at in stuck_rows:
+            await recover_stuck_jobs(conn, timeout_hours=STUCK_JOB_AGE_HOURS)
+            await conn.execute(
+                "UPDATE ingestion_jobs SET retry_count = retry_count + 1 WHERE id = %s",
+                (job_id,),
+            )
+            await conn.close()
+            conn = None
+
+            jitter = random.uniform(0, 5)
+            logger.warning(
+                f"Retrying stuck job id={job_id} source={source} "
+                f"(started {started_at}, jitter={jitter:.1f}s)"
+            )
+            await asyncio.sleep(jitter)
+            try:
+                await run_source(registry, source)
+                logger.info(f"Stuck-job retry succeeded: job id={job_id} source={source}")
+            except Exception as e:
+                logger.error(
+                    f"Stuck-job retry failed: job id={job_id} source={source}: {e}",
+                    exc_info=True,
+                )
+
+            conn = await get_db_connection()
+
+        await conn.close()
+    except Exception as e:
+        logger.error(f"run_failed_retries error: {e}", exc_info=True)
+        if conn is not None:
+            try:
+                await conn.close()
+            except Exception:
+                pass
+
+
 async def main():
     scheduler = AsyncIOScheduler()
 
@@ -277,13 +463,26 @@ async def main():
     # Config backup: daily at 01:00 UTC + weekly Sunday with full snapshot
     scheduler.add_job(run_config_backup, CronTrigger(hour=1, minute=0), id="config_backup")
 
+    scheduler.add_job(
+        run_failed_retries,
+        IntervalTrigger(minutes=RETRY_INTERVAL_MINUTES),
+        id="retry_failed_ingestion",
+    )
+    scheduler.add_job(
+        recover_stuck_jobs_wrapper,
+        IntervalTrigger(hours=STUCK_RECOVERY_INTERVAL_HOURS),
+        id="stuck_job_recovery",
+    )
+
     scheduler.start()
     logger.info(
         "Scheduler started. Jobs: news=daily@06:00 | arxiv=Mon@03:00 | "
         "biorxiv=Tue@03:00 | wikipedia=Sun@02:00 | forex=daily@07:00 | "
         "world_bank=Sun@04:00 | joplin_safety=every 6h | "
         "kb_incremental=hourly@:15 | kb_full=Sun@02:30 | "
-        "volume_sync=daily@04:30 | config_backup=daily@01:00"
+        "volume_sync=daily@04:30 | config_backup=daily@01:00 | "
+        f"retry_failed=every {RETRY_INTERVAL_MINUTES}min | "
+        f"stuck_recovery=every {STUCK_RECOVERY_INTERVAL_HOURS}h"
     )
     logger.info(
         "Wikipedia updates are gated — will not run until dump seed is marked done in ingestion_jobs."

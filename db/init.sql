@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS ingestion_jobs (
     finished_at     TIMESTAMPTZ,
     error_message   TEXT,                                  -- last error for failed jobs
     failed_count    INTEGER     NOT NULL DEFAULT 0,         -- per-job failure count
+    retry_count     INTEGER     NOT NULL DEFAULT 0,         -- incremented on transient failures
     duration_ms     INTEGER,                                -- auto-calculated: finished_at - started_at
     metadata        JSONB       NOT NULL DEFAULT '{}'
 );
