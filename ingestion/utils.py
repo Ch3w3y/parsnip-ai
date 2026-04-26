@@ -546,6 +546,32 @@ async def finish_job(
     await conn.execute(sql, params)
 
 
+async def write_to_dlq(
+    conn,
+    source: str,
+    source_id: str,
+    content: str | None,
+    metadata: dict,
+    error: Exception,
+    retry_count: int = 0,
+):
+    await conn.execute(
+        """
+        INSERT INTO failed_records (source, source_id, content, metadata, error_message, error_class, retry_count)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            source,
+            source_id,
+            content,
+            psycopg.types.json.Jsonb(metadata),
+            str(error)[:2000],
+            type(error).__name__,
+            retry_count,
+        ),
+    )
+
+
 async def recover_stuck_jobs(conn, timeout_hours: float = None) -> int:
     """Mark running ingestion jobs as failed if they have been running too long.
 

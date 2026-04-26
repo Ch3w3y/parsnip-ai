@@ -33,7 +33,7 @@ import psycopg
 from dotenv import load_dotenv
 from pgvector.psycopg import register_vector_async
 
-from utils import cleanup_orphan_chunks, compute_content_hash
+from utils import cleanup_orphan_chunks, compute_content_hash, write_to_dlq
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -299,6 +299,12 @@ async def main_async(full: bool = False, user_id_override: str | None = None):
                     raw_content = r.content
                 except Exception as e:
                     logger.warning(f"Could not fetch note {note_id}: {e}")
+                    try:
+                        await write_to_dlq(conn, source="joplin_notes", source_id=note_id,
+                                           content=None, metadata={"note_id": note_id}, error=e)
+                        await conn.commit()
+                    except Exception:
+                        pass
                     continue
 
                 title, parent_id, body = _parse_joplin_content(raw_content)

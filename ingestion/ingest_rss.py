@@ -37,6 +37,7 @@ from utils import (
     create_job,
     finish_job,
     update_job_progress,
+    write_to_dlq,
     save_raw,
     iter_raw,
     latest_raw,
@@ -338,6 +339,8 @@ async def main_async(feeds: list[str], feed_file: str | None, from_raw: Path | N
         logger.error(f"rss ingestion failed: {exc}", exc_info=True)
         if conn is not None and job_id is not None:
             try:
+                await write_to_dlq(conn, source="rss", source_id=f"job:{job_id}",
+                                   content=None, metadata={"job_id": job_id}, error=exc)
                 await finish_job(conn, job_id, "failed", error_message=str(exc)[:500])
                 await conn.commit()
             except Exception as finish_exc:

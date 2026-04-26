@@ -228,6 +228,26 @@ CREATE TABLE IF NOT EXISTS hitl_sessions (
 CREATE INDEX IF NOT EXISTS hitl_sessions_note_id_idx ON hitl_sessions (note_id);
 CREATE INDEX IF NOT EXISTS hitl_sessions_status_idx  ON hitl_sessions (status);
 
+-- ── Failed records (Dead Letter Queue) ────────────────────────────────────────
+-- Captures records that failed permanently during ingestion, preserving source
+-- context and error info for later replay or manual inspection.
+CREATE TABLE IF NOT EXISTS failed_records (
+    id              BIGSERIAL PRIMARY KEY,
+    source          TEXT        NOT NULL,
+    source_id       TEXT        NOT NULL,
+    content         TEXT,
+    metadata        JSONB       NOT NULL DEFAULT '{}',
+    error_message   TEXT,
+    error_class     TEXT,       -- exception class name (ValueError, ConnectError, etc.)
+    retry_count     INTEGER     NOT NULL DEFAULT 0,
+    status          TEXT        NOT NULL DEFAULT 'pending',  -- 'pending' | 'retried' | 'permanent'
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ,
+    last_retry_at   TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS failed_records_source_status_idx ON failed_records(source, status);
+
 -- ── Thread metadata (caches titles for fast thread listing) ──────────────────
 -- Avoids slow aget_state() per thread — titles are extracted once on first load
 -- and served from this table for instant /threads responses.
