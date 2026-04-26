@@ -9,6 +9,7 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import AsyncIterator, Iterator
 
@@ -20,6 +21,137 @@ from pgvector.psycopg import register_vector_async
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 logger = logging.getLogger(__name__)
+
+
+# ── Circuit breaker for Ollama embedding endpoint ──────────────────────────────
+# When Ollama is unreachable, each embed_batch() call retries 3× with 120s timeout
+# each = ~6 minutes of blocking. The circuit breaker fast-fails after consecutive
+# connection/timeout errors so callers don't burn time waiting for a dead service.
+#
+# Thresholds:
+#   3 consecutive connection failures within 60s → open for 30s (half-open after)
+#   5 consecutive connection failures within 60s → open for 300s (5 min)
+#
+# HTTP 400 (bad input) does NOT trip the circuit — it's a client error, not a
+# service-health signal. HTTP 500+ and ConnectError/Timeout DO trip it.
+
+
+class _CircuitState(Enum):
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+
+class _EmbedCircuitBreaker:
+    """Async-safe circuit breaker wrapping Ollama embed calls.
+
+    Tracks consecutive failures of connection/timeout type. Once a threshold is
+    reached, the circuit opens and fast-fails callers without hitting Ollama at
+    all. After a cooldown period, the circuit enters half-open where one probe
+    call is allowed; if it succeeds the circuit closes, if it fails the circuit
+    re-opens with an escalating cooldown.
+    """
+
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        self._state: _CircuitState = _CircuitState.CLOSED
+        self._consecutive_failures: int = 0
+        self._first_failure_at: float | None = None
+        self._opened_at: float | None = None
+        self._open_duration: float = 0.0
+
+    async def is_open(self) -> bool:
+        """Return True if the circuit is OPEN (callers should fast-fail)."""
+        async with self._lock:
+            if self._state == _CircuitState.CLOSED:
+                return False
+            if self._state == _CircuitState.HALF_OPEN:
+                return False
+            assert self._opened_at is not None
+            elapsed = time.monotonic() - self._opened_at
+            if elapsed >= self._open_duration:
+                self._state = _CircuitState.HALF_OPEN
+                logger.info(
+                    "embed circuit breaker: OPEN → HALF_OPEN "
+                    f"(after {self._open_duration:.0f}s cooldown)"
+                )
+                return False
+            return True
+
+    async def record_success(self) -> None:
+        """Mark a successful call — resets failure count, closes circuit."""
+        async with self._lock:
+            if self._state != _CircuitState.CLOSED:
+                prev = self._state.value
+                self._state = _CircuitState.CLOSED
+                self._consecutive_failures = 0
+                self._first_failure_at = None
+                self._opened_at = None
+                logger.info(
+                    f"embed circuit breaker: {prev} → closed (success)"
+                )
+            else:
+                self._consecutive_failures = 0
+                self._first_failure_at = None
+
+    async def record_failure(self, exc: Exception) -> None:
+        """Record a call failure. Trips the circuit if thresholds are crossed.
+
+        Only connection/timeout/server errors trip the circuit.
+        HTTP 400 errors are ignored (bad input, not service health).
+        """
+        if isinstance(exc, httpx.HTTPStatusError):
+            if exc.response.status_code == 400:
+                return
+        # All other errors (ConnectError, TimeoutException, HTTP 5xx) trip the circuit
+
+        async with self._lock:
+            now = time.monotonic()
+            self._consecutive_failures += 1
+
+            if self._first_failure_at is None:
+                self._first_failure_at = now
+
+            window_elapsed = now - self._first_failure_at
+            if window_elapsed > 60.0:
+                self._first_failure_at = now
+
+            if self._consecutive_failures >= 5:
+                new_duration = 300.0
+            elif self._consecutive_failures >= 3:
+                new_duration = 30.0
+            else:
+                return
+
+            prev_state = self._state.value
+            self._state = _CircuitState.OPEN
+            self._opened_at = now
+            self._open_duration = max(self._open_duration, new_duration)
+            logger.warning(
+                f"embed circuit breaker: {prev_state} → OPEN "
+                f"({self._consecutive_failures} consecutive failures, "
+                f"cooldown={self._open_duration:.0f}s)"
+            )
+
+
+# Module-level circuit breaker instance
+_embed_cb = _EmbedCircuitBreaker()
+
+
+async def reset_circuit_breaker() -> None:
+    """Manually reset the embed circuit breaker to closed state.
+
+    Call this after fixing Ollama (e.g. restarting the service) to immediately
+    resume embedding calls instead of waiting for the cooldown to expire.
+    """
+    async with _embed_cb._lock:
+        prev = _embed_cb._state.value
+        _embed_cb._state = _CircuitState.CLOSED
+        _embed_cb._consecutive_failures = 0
+        _embed_cb._first_failure_at = None
+        _embed_cb._opened_at = None
+        _embed_cb._open_duration = 0.0
+    logger.info(f"embed circuit breaker: {prev} → closed (manual reset)")
 
 # ── Landing zone (raw fetch cache) ────────────────────────────────────────────
 
@@ -93,6 +225,10 @@ async def embed_batch(
     texts: list[str], retries: int = 3, model: str | None = None
 ) -> list[list[float]] | None:
     """Embed a batch of texts via Ollama. Returns None on unrecoverable failure."""
+    if await _embed_cb.is_open():
+        logger.warning("embed circuit breaker OPEN — fast-failing embed_batch()")
+        return None
+
     embed_model = model or EMBED_MODEL
 
     # Filter out empty/whitespace-only texts — Ollama returns 400 for these
@@ -105,6 +241,7 @@ async def embed_batch(
     if not cleaned:
         return None
 
+    last_exc: Exception | None = None
     for attempt in range(retries):
         try:
             async with httpx.AsyncClient(timeout=120) as client:
@@ -113,8 +250,10 @@ async def embed_batch(
                     json={"model": embed_model, "input": cleaned, "truncate": True},
                 )
                 r.raise_for_status()
+                await _embed_cb.record_success()
                 return [[float(v) for v in emb] for emb in r.json()["embeddings"]]
         except httpx.HTTPStatusError as e:
+            last_exc = e
             # 400 from Ollama — try per-item with cleaning, return None-aligned list
             if e.response.status_code == 400 and attempt == 0:
                 logger.warning(
@@ -142,7 +281,10 @@ async def embed_batch(
                             f"Failed text {i}/{len(cleaned)} (len={len(t)}): {e2}"
                         )
                         embeddings.append(None)
-                return embeddings if any(e is not None for e in embeddings) else None
+                if any(e is not None for e in embeddings):
+                    await _embed_cb.record_success()
+                    return embeddings
+                return None
 
             wait = 2**attempt
             logger.warning(
@@ -151,12 +293,16 @@ async def embed_batch(
             if attempt < retries - 1:
                 await asyncio.sleep(wait)
         except Exception as e:
+            last_exc = e
             wait = 2**attempt
             logger.warning(
                 f"Embed attempt {attempt + 1}/{retries} failed: {e} — retry in {wait}s"
             )
             if attempt < retries - 1:
                 await asyncio.sleep(wait)
+
+    if last_exc is not None:
+        await _embed_cb.record_failure(last_exc)
     return None
 
 

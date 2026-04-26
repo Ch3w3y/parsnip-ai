@@ -48,6 +48,7 @@ logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 32
 DEFAULT_FEEDS_FILE = Path(__file__).parent / "data" / "rss_feeds.json"
+RATE_DELAY = 1.0  # seconds between API calls (RSS feeds can be slow)
 
 DEFAULT_FEEDS = [
     "https://rss.arxiv.org/rss/cs.AI",
@@ -194,6 +195,7 @@ async def fetch_feed(url: str) -> tuple[str, str]:
     except Exception as e:
         logger.warning(f"Failed to fetch feed {url}: {e}")
         return url, ""
+    await asyncio.sleep(RATE_DELAY)
 
 
 async def fetch_all_feeds(urls: list[str]) -> list[dict]:

@@ -48,6 +48,7 @@ FRANKFURTER_API = "https://api.frankfurter.dev/v2"
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "mxbai-embed-large")
 BATCH_SIZE = 64
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
+RATE_DELAY = 0.5  # seconds between API calls (Frankfurter is free, no key needed)
 
 # Bases used when fetching all currencies — each base gets all other currencies as quotes
 ALL_CURRENCY_BASES = ["USD", "EUR", "GBP", "JPY"]
@@ -144,6 +145,7 @@ async def fetch_all(days: int = 30, pairs: list[tuple[str, str]] | None = None,
                 except Exception as e:
                     logger.error(f"Failed {base} {win_start}–{win_end}: {e}")
                     continue
+                await asyncio.sleep(RATE_DELAY)
             logger.info(f"{base}: {base_count} observations fetched")
 
     logger.info(f"Fetched {len(records)} total rate observations")

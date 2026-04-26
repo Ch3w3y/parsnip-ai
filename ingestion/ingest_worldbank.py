@@ -49,6 +49,7 @@ WB_API = "https://api.worldbank.org/v2"
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "mxbai-embed-large")
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 BATCH_SIZE = 64
+RATE_DELAY = 0.5  # seconds between API calls (World Bank API is generous)
 
 # Key macro indicators — the ones most useful for cross-referencing with forex
 INDICATORS = {
@@ -115,6 +116,7 @@ async def fetch_indicator_all_countries(client: httpx.AsyncClient,
     except Exception as e:
         logger.warning(f"Failed all-countries/{indicator}: {e}")
         return []
+    await asyncio.sleep(RATE_DELAY)
 
 
 async def fetch_indicator(client: httpx.AsyncClient, country: str,
@@ -155,6 +157,7 @@ async def fetch_indicator(client: httpx.AsyncClient, country: str,
     except Exception as e:
         logger.warning(f"Failed {country}/{indicator}: {e}")
         return []
+    await asyncio.sleep(RATE_DELAY)
 
 
 async def fetch_all(countries: list[str] | None = None,

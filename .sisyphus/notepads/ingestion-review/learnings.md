@@ -1,14 +1,32 @@
-# Ingestion Review — Issues & Problems
+# Rate Limiting Implementation - Learnings
 
-## Active Issues
+## Summary
+Added rate limiting to 4 ingestion scripts that lacked delay between API calls:
+- `ingestion/ingest_forex.py` - RATE_DELAY = 0.5 (Frankfurter API)
+- `ingestion/ingest_news.py` - RATE_DELAY = 1.0 (various news sources)
+- `ingestion/ingest_rss.py` - RATE_DELAY = 1.0 (RSS feeds)
+- `ingestion/ingest_worldbank.py` - RATE_DELAY = 0.5 (World Bank API)
 
-## Resolved Issues
+## Implementation Pattern
+1. **Constant Definition**: Added `RATE_DELAY = <value>` constant near top of each file (after imports, with other constants)
+2. **Sleep Placement**: Added `await asyncio.sleep(RATE_DELAY)` after each HTTP API call
+3. **Avoid Over-limiting**: Only added delays where actual HTTP requests occur, not in processing loops
 
-## Patterns Learned
-- Landing zone pattern: fetch → save_raw(jsonl.gz) → iter_raw → embed → upsert
-- Entry point convention: `main_async()` preferred, `main()` fallback with `argparse`
-- Conflict strategies: `skip` for immutable (papers), `update` for mutable (notes, wikipedia)
-- `sources.yaml` is the single source of truth for schedules + conflict + embedding model
-- `SourceRegistry` auto-discovers scripts not declared in YAML
-13. ingest_wikipedia.py has sync `def main()` (not async), contrary to audit report claim
-14. Only 11/14 scripts use `save_raw` (landing zone): joplin, news, wikipedia_updates, wikipedia do NOT
+## Key Decisions
+- Used `asyncio.sleep()` instead of `time.sleep()` to avoid blocking the event loop
+- Placed delays at the function level where HTTP calls occur, not in batch processing
+- Chose delay values based on API characteristics:
+  - 0.5s: Generous APIs (Frankfurter, World Bank)
+  - 1.0s: Variable/mixed sources (news, RSS)
+
+## Files Modified
+1. `ingest_forex.py`: Added RATE_DELAY and sleep in `fetch_timeseries` loop
+2. `ingest_news.py`: Added RATE_DELAY and sleep in `fetch_feed` and `fetch_full_text` functions
+3. `ingest_rss.py`: Added RATE_DELAY and sleep in `fetch_feed` function
+4. `ingest_worldbank.py`: Added RATE_DELAY and sleep in both `fetch_indicator_all_countries` and `fetch_indicator` functions
+
+## Verification
+- All files compile successfully with `py_compile`
+- No syntax errors detected
+- No LSP diagnostics errors
+- Follows existing code style and conventions from `ingest_wikipedia_updates.py`

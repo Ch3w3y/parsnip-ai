@@ -1,11 +1,14 @@
 """Tests for ingestion utility functions."""
 
+import asyncio
 import gzip
 import json
 import sys
+import time
 from pathlib import Path
 from unittest.mock import patch, AsyncMock, MagicMock
 
+import httpx
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "ingestion"))
@@ -175,3 +178,145 @@ class TestBulkUpsertChunks:
         ]
         result = await bulk_upsert_chunks(mock_db_connection, rows)
         assert result == 1
+
+
+class TestEmbedCircuitBreaker:
+    def _make_cb(self):
+        from utils import _EmbedCircuitBreaker, _CircuitState
+
+        cb = _EmbedCircuitBreaker()
+        assert cb._state == _CircuitState.CLOSED
+        assert cb._consecutive_failures == 0
+        return cb
+
+    @pytest.mark.asyncio
+    async def test_cb_starts_closed(self):
+        cb = self._make_cb()
+        assert await cb.is_open() is False
+
+    @pytest.mark.asyncio
+    async def test_cb_connect_error_trips(self):
+        from utils import _CircuitState
+
+        cb = self._make_cb()
+        await cb.record_failure(httpx.ConnectError("Connection refused"))
+        assert cb._consecutive_failures == 1
+        assert cb._state == _CircuitState.CLOSED
+
+        await cb.record_failure(httpx.ConnectError("Connection refused"))
+        await cb.record_failure(httpx.ConnectError("Connection refused"))
+        assert cb._consecutive_failures == 3
+        assert cb._state == _CircuitState.OPEN
+        assert await cb.is_open() is True
+
+    @pytest.mark.asyncio
+    async def test_cb_400_does_not_trip(self):
+        cb = self._make_cb()
+        response = MagicMock()
+        response.status_code = 400
+        exc = httpx.HTTPStatusError("400", request=MagicMock(), response=response)
+        await cb.record_failure(exc)
+        assert cb._consecutive_failures == 0
+        assert await cb.is_open() is False
+
+    @pytest.mark.asyncio
+    async def test_cb_500_trips(self):
+        from utils import _CircuitState
+
+        cb = self._make_cb()
+        response = MagicMock()
+        response.status_code = 500
+        exc = httpx.HTTPStatusError("500", request=MagicMock(), response=response)
+        for _ in range(3):
+            await cb.record_failure(exc)
+        assert cb._state == _CircuitState.OPEN
+
+    @pytest.mark.asyncio
+    async def test_cb_success_resets(self):
+        from utils import _CircuitState
+
+        cb = self._make_cb()
+        response = MagicMock()
+        response.status_code = 500
+        exc = httpx.HTTPStatusError("500", request=MagicMock(), response=response)
+        for _ in range(3):
+            await cb.record_failure(exc)
+        assert cb._state == _CircuitState.OPEN
+
+        await cb.record_success()
+        assert cb._state == _CircuitState.CLOSED
+        assert cb._consecutive_failures == 0
+
+    @pytest.mark.asyncio
+    async def test_cb_escalating_cooldown(self):
+        cb = self._make_cb()
+        response = MagicMock()
+        response.status_code = 503
+        exc = httpx.HTTPStatusError("503", request=MagicMock(), response=response)
+
+        for _ in range(5):
+            await cb.record_failure(exc)
+        assert cb._open_duration == 300.0
+
+    @pytest.mark.asyncio
+    async def test_cb_half_open_transition(self):
+        from utils import _CircuitState
+
+        cb = self._make_cb()
+        response = MagicMock()
+        response.status_code = 500
+        exc = httpx.HTTPStatusError("500", request=MagicMock(), response=response)
+
+        for _ in range(3):
+            await cb.record_failure(exc)
+        assert cb._state == _CircuitState.OPEN
+        assert cb._opened_at is not None
+
+        cb._opened_at = time.monotonic() - 31
+        assert await cb.is_open() is False
+        assert cb._state == _CircuitState.HALF_OPEN
+
+        await cb.record_success()
+        assert cb._state == _CircuitState.CLOSED
+
+    @pytest.mark.asyncio
+    async def test_reset_circuit_breaker(self):
+        from utils import _CircuitState, reset_circuit_breaker, _embed_cb
+
+        response = MagicMock()
+        response.status_code = 500
+        exc = httpx.HTTPStatusError("500", request=MagicMock(), response=response)
+        for _ in range(3):
+            await _embed_cb.record_failure(exc)
+        assert _embed_cb._state == _CircuitState.OPEN
+
+        await reset_circuit_breaker()
+        assert _embed_cb._state == _CircuitState.CLOSED
+        assert _embed_cb._consecutive_failures == 0
+
+    @pytest.mark.asyncio
+    async def test_embed_batch_fast_fails_when_open(self):
+        from utils import embed_batch, _embed_cb, _CircuitState, reset_circuit_breaker
+
+        response = MagicMock()
+        response.status_code = 500
+        exc = httpx.HTTPStatusError("500", request=MagicMock(), response=response)
+        for _ in range(3):
+            await _embed_cb.record_failure(exc)
+        assert _embed_cb._state == _CircuitState.OPEN
+
+        result = await embed_batch(["hello"])
+        assert result is None
+
+        await reset_circuit_breaker()
+
+    @pytest.mark.asyncio
+    async def test_embed_batch_success_resets_cb(self, mock_ollama):
+        from utils import embed_batch, reset_circuit_breaker, _embed_cb, _CircuitState
+
+        await reset_circuit_breaker()
+        assert _embed_cb._state == _CircuitState.CLOSED
+
+        result = await embed_batch(["test"], model="test-model")
+        assert result is not None
+        assert _embed_cb._consecutive_failures == 0

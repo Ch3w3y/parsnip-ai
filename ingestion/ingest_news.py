@@ -40,6 +40,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 16  # smaller than arXiv — articles are longer
+RATE_DELAY = 1.0  # seconds between API calls (news sources vary)
 
 FEEDS: dict[str, list[dict]] = {
     "general": [
@@ -138,6 +139,7 @@ async def fetch_feed(client: httpx.AsyncClient, feed: dict) -> list[dict]:
     except Exception as e:
         logger.warning(f"Feed fetch failed [{feed['name']}]: {e}")
         return []
+    await asyncio.sleep(RATE_DELAY)
 
     try:
         root = ET.fromstring(r.text)
@@ -186,6 +188,7 @@ async def fetch_full_text(client: httpx.AsyncClient, url: str) -> str | None:
         return text if len(text) > 200 else None
     except Exception:
         return None
+    await asyncio.sleep(RATE_DELAY)
 
 
 async def ingest_articles(
