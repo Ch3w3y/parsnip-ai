@@ -33,7 +33,7 @@ import psycopg
 from dotenv import load_dotenv
 from pgvector.psycopg import register_vector_async
 
-from utils import cleanup_orphan_chunks
+from utils import cleanup_orphan_chunks, compute_content_hash
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -329,10 +329,11 @@ async def main_async(full: bool = False, user_id_override: str | None = None):
                         await conn.execute(
                             """
                             INSERT INTO knowledge_chunks
-                                (source, source_id, chunk_index, content, metadata, embedding, embedding_model, user_id)
-                            VALUES ('joplin_notes', %s, %s, %s, %s, %s, %s, %s)
+                                (source, source_id, chunk_index, content, content_hash, metadata, embedding, embedding_model, user_id)
+                            VALUES ('joplin_notes', %s, %s, %s, %s, %s, %s, %s, %s)
                             ON CONFLICT (source, source_id, chunk_index) DO UPDATE SET
                                 content         = EXCLUDED.content,
+                                content_hash    = EXCLUDED.content_hash,
                                 embedding       = EXCLUDED.embedding,
                                 embedding_model = EXCLUDED.embedding_model,
                                 metadata        = EXCLUDED.metadata,
@@ -343,6 +344,7 @@ async def main_async(full: bool = False, user_id_override: str | None = None):
                                 note_id,
                                 idx,
                                 chunk,
+                                compute_content_hash(chunk),
                                 psycopg.types.json.Jsonb(metadata),
                                 emb,
                                 "mxbai-embed-large",

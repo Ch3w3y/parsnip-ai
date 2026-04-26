@@ -27,6 +27,7 @@ from dotenv import load_dotenv
 from tqdm import tqdm
 
 from utils import (
+    compute_content_hash,
     embed_batch,
     bulk_upsert_chunks,
     cleanup_orphan_chunks,
@@ -276,6 +277,7 @@ async def process_records(records: list[dict]):
                     chunk["source_id"],
                     0,
                     text,
+                    compute_content_hash(text),
                     chunk["metadata"],
                     emb,
                     EMBED_MODEL,

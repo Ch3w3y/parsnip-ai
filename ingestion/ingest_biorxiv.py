@@ -24,6 +24,7 @@ import httpx
 from dotenv import load_dotenv
 
 from utils import (
+    compute_content_hash,
     embed_batch,
     upsert_chunks,
     get_db_connection,
@@ -168,6 +169,7 @@ async def ingest_papers(papers: list[dict], conn, source: str, job_id: int) -> i
                     "server":     source,
                 },
                 on_conflict="nothing",
+                content_hashes=[compute_content_hash(text)],
             )
             total_inserted += n
         pending_texts.clear()

@@ -29,6 +29,7 @@ from dotenv import load_dotenv
 
 from utils import (
     chunk_text,
+    compute_content_hash,
     embed_batch,
     bulk_upsert_chunks,
     cleanup_orphan_chunks,
@@ -270,6 +271,7 @@ async def process_articles(articles: list[dict], conn, job_id: int) -> int:
                     source_id,
                     chunk_idx,
                     chunk_body,
+                    compute_content_hash(chunk_body),
                     metadata,
                     None,
                     "mxbai-embed-large",

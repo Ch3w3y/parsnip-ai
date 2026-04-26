@@ -31,6 +31,7 @@ from tqdm import tqdm
 
 from utils import (
     chunk_text,
+    compute_content_hash,
     embed_batch,
     bulk_upsert_chunks,
     cleanup_orphan_chunks,
@@ -116,6 +117,7 @@ async def process_articles(wiki_dir: Path, skip: int = 0, limit: int | None = No
                     source_id,
                     chunk_idx,
                     text,
+                    compute_content_hash(text),
                     metadata,
                     emb,
                     "mxbai-embed-large",

@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 
 from utils import (
     chunk_text,
+    compute_content_hash,
     embed_batch,
     upsert_chunks,
     get_db_connection,
@@ -230,6 +231,7 @@ async def process_papers(papers: list[dict], conn, job_id: int) -> int:
                     "search_term": paper.get("search_term", ""),
                 },
                 on_conflict="nothing",
+                content_hashes=[compute_content_hash(text)],
             )
         pending_texts.clear()
         pending_papers.clear()

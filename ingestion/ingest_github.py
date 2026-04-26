@@ -24,6 +24,7 @@ from dotenv import load_dotenv
 
 from utils import (
     chunk_text,
+    compute_content_hash,
     embed_batch,
     bulk_upsert_chunks,
     cleanup_orphan_chunks,
@@ -432,8 +433,13 @@ async def process_files(files: list[dict], conn, job_id: int) -> int:
             logger.error("Embedding failed, skipping batch.")
             rows.clear()
             return
-        await bulk_upsert_chunks(conn, rows, on_conflict="update")
-        total += len(rows)
+        good_rows = [
+            row[:6] + (emb,) + row[7:]
+            for row, emb in zip(rows, embeddings)
+            if emb is not None
+        ]
+        await bulk_upsert_chunks(conn, good_rows, on_conflict="update")
+        total += len(good_rows)
 
         for sid, count in source_chunk_counts.items():
             await cleanup_orphan_chunks(conn, "github", sid, count)
@@ -473,6 +479,7 @@ async def process_files(files: list[dict], conn, job_id: int) -> int:
                     source_id,
                     chunk_idx,
                     chunk_content,
+                    compute_content_hash(chunk_content),
                     metadata,
                     None,  # embedding placeholder
                     EMBED_MODEL,

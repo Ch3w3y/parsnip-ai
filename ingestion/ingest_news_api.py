@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 
 from utils import (
     chunk_text,
+    compute_content_hash,
     embed_batch,
     upsert_chunks,
     get_db_connection,
@@ -152,6 +153,7 @@ async def ingest_articles(articles: list[dict], conn) -> int:
                 embeddings=[emb],
                 metadata=meta,
                 on_conflict="nothing",
+                content_hashes=[compute_content_hash(text)],
             )
             total_inserted += n
         pending_texts.clear()

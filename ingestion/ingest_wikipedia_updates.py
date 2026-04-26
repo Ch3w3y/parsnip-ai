@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 
 from utils import (
     chunk_text,
+    compute_content_hash,
     embed_batch,
     cleanup_orphan_chunks,
     get_db_connection,
@@ -140,17 +141,19 @@ async def process_articles(articles: list[dict], conn) -> int:
                     await conn.execute(
                         """
                         INSERT INTO knowledge_chunks
-                            (source, source_id, chunk_index, content, metadata, embedding, embedding_model)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            (source, source_id, chunk_index, content, content_hash, metadata, embedding, embedding_model)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (source, source_id, chunk_index)
                          DO UPDATE SET
                             content         = EXCLUDED.content,
+                            content_hash    = EXCLUDED.content_hash,
                             embedding       = EXCLUDED.embedding,
                             embedding_model = EXCLUDED.embedding_model,
                             updated_at      = NOW()
                         """,
                          ("wikipedia", meta["source_id"], meta["chunk_idx"],
-                          text, __import__("psycopg").types.json.Jsonb(meta["metadata"]), emb, "mxbai-embed-large"),
+                          text, compute_content_hash(text),
+                          __import__("psycopg").types.json.Jsonb(meta["metadata"]), emb, "mxbai-embed-large"),
                      )
                     total_inserted += 1
             except Exception as e:

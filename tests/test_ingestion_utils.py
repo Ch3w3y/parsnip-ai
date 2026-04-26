@@ -171,6 +171,7 @@ class TestBulkUpsertChunks:
                 "doc_1",
                 0,
                 "content",
+                "abc123hash",
                 {"title": "test"},
                 [0.1] * 1024,
                 "mxbai-embed-large",

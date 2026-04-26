@@ -340,13 +340,20 @@ async def upsert_chunks(
     metadata: dict,
     on_conflict: str = "update",  # "update" refreshes changed content; "nothing" skips
     embedding_model: str = "mxbai-embed-large",
+    content_hashes: list[str | None] | None = None,
 ) -> int:
-    """Insert chunks with embeddings. Returns count of rows written."""
+    """Insert chunks with embeddings. Returns count of rows written.
+
+    If *content_hashes* is provided, each chunk is checked against the existing
+    row's content_hash. When the hash matches, the chunk is skipped (no re-embed
+    needed). Pass None or omit for backward-compatible always-upsert behaviour.
+    """
     if on_conflict == "update":
         conflict_clause = """
             ON CONFLICT (source, source_id, chunk_index)
             DO UPDATE SET
                 content         = EXCLUDED.content,
+                content_hash    = EXCLUDED.content_hash,
                 embedding       = EXCLUDED.embedding,
                 embedding_model = EXCLUDED.embedding_model,
                 metadata        = EXCLUDED.metadata,
@@ -357,13 +364,30 @@ async def upsert_chunks(
 
     inserted = 0
     for idx, (text, emb) in enumerate(zip(chunks, embeddings)):
+        ch = content_hashes[idx] if content_hashes and idx < len(content_hashes) else None
+
+        # Skip if content unchanged (only for on_conflict="update")
+        if ch is not None and on_conflict == "update":
+            try:
+                existing = await conn.execute(
+                    "SELECT content_hash FROM knowledge_chunks "
+                    "WHERE source = %s AND source_id = %s AND chunk_index = %s",
+                    (source, source_id, idx),
+                )
+                row = await existing.fetchone()
+                if row is not None and row[0] == ch:
+                    # Content unchanged — skip re-embedding
+                    continue
+            except Exception:
+                pass  # If SELECT fails, proceed with upsert
+
         try:
             async with conn.transaction():
                 result = await conn.execute(
                     f"""
                     INSERT INTO knowledge_chunks
-                        (source, source_id, chunk_index, content, metadata, embedding, embedding_model)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        (source, source_id, chunk_index, content, content_hash, metadata, embedding, embedding_model)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     {conflict_clause}
                     """,
                     (
@@ -371,6 +395,7 @@ async def upsert_chunks(
                         source_id,
                         idx,
                         text,
+                        ch,
                         psycopg.types.json.Jsonb(metadata),
                         emb,
                         embedding_model,
@@ -387,13 +412,16 @@ async def bulk_upsert_chunks(
     conn,
     rows: list[
         tuple
-    ],  # (source, source_id, chunk_index, content, metadata_dict, embedding, embedding_model)
+    ],  # (source, source_id, chunk_index, content, content_hash|None, metadata_dict, embedding, embedding_model)
     on_conflict: str = "update",
 ) -> int:
     """Bulk-insert many chunks in a single transaction using executemany.
 
     Dramatically faster than upsert_chunks for large batches (Wikipedia-scale)
     — replaces N individual transactions with one transaction + N pipelined statements.
+
+    Row tuples have 8 elements: source, source_id, chunk_index, content,
+    content_hash (str|None), metadata (dict), embedding, embedding_model.
     """
     if not rows:
         return 0
@@ -403,6 +431,7 @@ async def bulk_upsert_chunks(
             ON CONFLICT (source, source_id, chunk_index)
             DO UPDATE SET
                 content         = EXCLUDED.content,
+                content_hash    = EXCLUDED.content_hash,
                 embedding       = EXCLUDED.embedding,
                 embedding_model = EXCLUDED.embedding_model,
                 metadata        = EXCLUDED.metadata,
@@ -413,14 +442,14 @@ async def bulk_upsert_chunks(
 
     sql = f"""
         INSERT INTO knowledge_chunks
-            (source, source_id, chunk_index, content, metadata, embedding, embedding_model)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+            (source, source_id, chunk_index, content, content_hash, metadata, embedding, embedding_model)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         {conflict_clause}
     """
 
     params = [
-        (src, sid, idx, content, psycopg.types.json.Jsonb(meta), emb, model)
-        for src, sid, idx, content, meta, emb, model in rows
+        (src, sid, idx, content, ch, psycopg.types.json.Jsonb(meta), emb, model)
+        for src, sid, idx, content, ch, meta, emb, model in rows
     ]
 
     async with conn.transaction():
