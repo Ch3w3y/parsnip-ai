@@ -77,114 +77,136 @@ def iter_wiki_articles(wiki_dir: Path):
 
 
 async def process_articles(wiki_dir: Path, skip: int = 0, limit: int | None = None):
-    conn = await get_db_connection()
-    job_id = await create_job(conn, "wikipedia")
-    await conn.commit()
+    conn = None
+    job_id = None
+    try:
+        conn = await get_db_connection()
+        job_id = await create_job(conn, "wikipedia")
+        await conn.commit()
 
-    # Pending batch: accumulate until BATCH_SIZE, then embed + bulk insert together
-    pending_texts: list[str] = []
-    pending_rows: list[tuple] = []  # (source_id, metadata_dict) per chunk
+        # Pending batch: accumulate until BATCH_SIZE, then embed + bulk insert together
+        pending_texts: list[str] = []
+        pending_rows: list[tuple] = []  # (source_id, metadata_dict) per chunk
 
-    total_articles = 0
-    total_chunks_inserted = 0
-    skipped = 0
-    t0 = time.time()
+        total_articles = 0
+        total_chunks_inserted = 0
+        skipped = 0
+        t0 = time.time()
 
-    async def flush_batch():
-        nonlocal total_chunks_inserted
-        if not pending_texts:
-            return
-        embeddings = await embed_batch(pending_texts)
-        if embeddings is None:
-            logger.error(
-                f"Embedding failed for batch of {len(pending_texts)}, skipping."
-            )
+        async def flush_batch():
+            nonlocal total_chunks_inserted
+            if not pending_texts:
+                return
+            embeddings = await embed_batch(pending_texts)
+            if embeddings is None:
+                logger.error(
+                    f"Embedding failed for batch of {len(pending_texts)}, skipping."
+                )
+                pending_texts.clear()
+                pending_rows.clear()
+                return
+
+            bulk_rows = [
+                (
+                    "wikipedia",
+                    source_id,
+                    chunk_idx,
+                    text,
+                    metadata,
+                    emb,
+                    "mxbai-embed-large",
+                )
+                for (source_id, chunk_idx, metadata), text, emb in zip(
+                    pending_rows, pending_texts, embeddings
+                )
+                if emb is not None
+            ]
+            inserted = await bulk_upsert_chunks(conn, bulk_rows, on_conflict="update")
+            total_chunks_inserted += inserted
+
             pending_texts.clear()
             pending_rows.clear()
-            return
 
-        bulk_rows = [
-            (
-                "wikipedia",
-                source_id,
-                chunk_idx,
-                text,
-                metadata,
-                emb,
-                "mxbai-embed-large",
-            )
-            for (source_id, chunk_idx, metadata), text, emb in zip(
-                pending_rows, pending_texts, embeddings
-            )
-            if emb is not None
-        ]
-        inserted = await bulk_upsert_chunks(conn, bulk_rows, on_conflict="update")
-        total_chunks_inserted += inserted
+        articles = iter_wiki_articles(wiki_dir)
 
-        pending_texts.clear()
-        pending_rows.clear()
-
-    articles = iter_wiki_articles(wiki_dir)
-
-    # Apply skip
-    for _ in range(skip):
-        try:
-            next(articles)
-            skipped += 1
-        except StopIteration:
-            break
-
-    with tqdm(desc="Wikipedia articles", unit="art", dynamic_ncols=True) as pbar:
-        for article in articles:
-            if limit and total_articles >= limit:
+        # Apply skip
+        for _ in range(skip):
+            try:
+                next(articles)
+                skipped += 1
+            except StopIteration:
                 break
 
-            chunks = chunk_text(article["text"])
-            if not chunks:
-                continue
+        with tqdm(desc="Wikipedia articles", unit="art", dynamic_ncols=True) as pbar:
+            for article in articles:
+                if limit and total_articles >= limit:
+                    break
 
-            metadata = {
-                "url": article.get("url", ""),
-                "wiki_id": article.get("id", ""),
-            }
+                chunks = chunk_text(article["text"])
+                if not chunks:
+                    continue
 
-            for idx, chunk in enumerate(chunks):
-                source_id = article["title"]
-                pending_texts.append(chunk)
-                pending_rows.append((source_id, idx, metadata))
+                metadata = {
+                    "url": article.get("url", ""),
+                    "wiki_id": article.get("id", ""),
+                }
 
-                if len(pending_texts) >= BATCH_SIZE:
+                for idx, chunk in enumerate(chunks):
+                    source_id = article["title"]
+                    pending_texts.append(chunk)
+                    pending_rows.append((source_id, idx, metadata))
+
+                    if len(pending_texts) >= BATCH_SIZE:
+                        await flush_batch()
+
+                total_articles += 1
+                pbar.update(1)
+
+                if total_articles % COMMIT_EVERY == 0:
                     await flush_batch()
+                    await update_job_progress(conn, job_id, total_articles)
+                    await conn.commit()
 
-            total_articles += 1
-            pbar.update(1)
+                    elapsed = time.time() - t0
+                    rate = total_articles / elapsed
+                    logger.info(
+                        f"Progress: {total_articles:,} articles | "
+                        f"{total_chunks_inserted:,} chunks | "
+                        f"{rate:.0f} art/s | "
+                        f"~{int((7_200_000 - total_articles) / rate / 3600)}h remaining"
+                    )
 
-            if total_articles % COMMIT_EVERY == 0:
-                await flush_batch()
-                await update_job_progress(conn, job_id, total_articles)
+        # Final flush
+        await flush_batch()
+        await update_job_progress(conn, job_id, total_articles)
+        await finish_job(conn, job_id, "done")
+        await conn.commit()
+        conn = None  # prevent finally from closing again
+
+        elapsed = time.time() - t0
+        logger.info(
+            f"\nDone! {total_articles:,} articles, {total_chunks_inserted:,} chunks "
+            f"in {elapsed / 3600:.1f}h"
+        )
+    except Exception as exc:
+        logger.error(f"wikipedia ingestion failed: {exc}", exc_info=True)
+        if conn is not None and job_id is not None:
+            try:
+                await finish_job(conn, job_id, "failed", error_message=str(exc)[:500])
                 await conn.commit()
-
-                elapsed = time.time() - t0
-                rate = total_articles / elapsed
-                logger.info(
-                    f"Progress: {total_articles:,} articles | "
-                    f"{total_chunks_inserted:,} chunks | "
-                    f"{rate:.0f} art/s | "
-                    f"~{int((7_200_000 - total_articles) / rate / 3600)}h remaining"
-                )
-
-    # Final flush
-    await flush_batch()
-    await update_job_progress(conn, job_id, total_articles)
-    await finish_job(conn, job_id, "done")
-    await conn.commit()
-    await conn.close()
-
-    elapsed = time.time() - t0
-    logger.info(
-        f"\nDone! {total_articles:,} articles, {total_chunks_inserted:,} chunks "
-        f"in {elapsed / 3600:.1f}h"
-    )
+            except Exception as finish_exc:
+                logger.error(f"Failed to mark job as failed: {finish_exc}")
+        raise
+    finally:
+        if conn is not None:
+            try:
+                await conn.rollback()
+            except Exception:
+                pass
+            try:
+                await conn.close()
+            except Exception:
+                pass
 
 
 async def get_resume_point() -> int:

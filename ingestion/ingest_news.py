@@ -250,53 +250,75 @@ async def ingest_articles(
 
 
 async def main_async(categories: list[str], days: int, fetch_full: bool):
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    conn = None
+    job_id = None
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
-    selected_feeds = []
-    for cat in categories:
-        selected_feeds.extend(FEEDS.get(cat, []))
+        selected_feeds = []
+        for cat in categories:
+            selected_feeds.extend(FEEDS.get(cat, []))
 
-    logger.info(f"Fetching {len(selected_feeds)} feeds (last {days} days)…")
+        logger.info(f"Fetching {len(selected_feeds)} feeds (last {days} days)…")
 
-    async with httpx.AsyncClient(
-        headers={"User-Agent": "Mozilla/5.0 (compatible; pi-agent/1.0)"},
-        timeout=20,
-    ) as client:
-        feed_results = await asyncio.gather(
-            *[fetch_feed(client, f) for f in selected_feeds],
-            return_exceptions=True,
-        )
+        async with httpx.AsyncClient(
+            headers={"User-Agent": "Mozilla/5.0 (compatible; pi-agent/1.0)"},
+            timeout=20,
+        ) as client:
+            feed_results = await asyncio.gather(
+                *[fetch_feed(client, f) for f in selected_feeds],
+                return_exceptions=True,
+            )
 
-    all_articles: list[dict] = []
-    for result in feed_results:
-        if isinstance(result, list):
-            for a in result:
-                if a["published"] is None or a["published"] >= cutoff:
-                    all_articles.append(a)
+        all_articles: list[dict] = []
+        for result in feed_results:
+            if isinstance(result, list):
+                for a in result:
+                    if a["published"] is None or a["published"] >= cutoff:
+                        all_articles.append(a)
 
-    # Deduplicate by URL
-    seen: set[str] = set()
-    unique = []
-    for a in all_articles:
-        if a["url"] not in seen:
-            seen.add(a["url"])
-            unique.append(a)
+        # Deduplicate by URL
+        seen: set[str] = set()
+        unique = []
+        for a in all_articles:
+            if a["url"] not in seen:
+                seen.add(a["url"])
+                unique.append(a)
 
-    logger.info(f"Found {len(unique)} unique articles after dedup")
+        logger.info(f"Found {len(unique)} unique articles after dedup")
 
-    conn = await get_db_connection()
-    job_id = await create_job(conn, "news", len(unique))
-    await conn.commit()
+        conn = await get_db_connection()
+        job_id = await create_job(conn, "news", len(unique))
+        await conn.commit()
 
-    total_inserted = [0]
-    await ingest_articles(unique, conn, job_id, fetch_full, total_inserted)
+        total_inserted = [0]
+        await ingest_articles(unique, conn, job_id, fetch_full, total_inserted)
 
-    await update_job_progress(conn, job_id, len(unique))
-    await finish_job(conn, job_id, "done")
-    await conn.commit()
-    await conn.close()
+        await update_job_progress(conn, job_id, len(unique))
+        await finish_job(conn, job_id, "done")
+        await conn.commit()
+        conn = None  # prevent finally from closing again
 
-    logger.info(f"News ingestion complete: {total_inserted[0]} new chunks from {len(unique)} articles")
+        logger.info(f"News ingestion complete: {total_inserted[0]} new chunks from {len(unique)} articles")
+    except Exception as exc:
+        logger.error(f"news ingestion failed: {exc}", exc_info=True)
+        if conn is not None and job_id is not None:
+            try:
+                await finish_job(conn, job_id, "failed", error_message=str(exc)[:500])
+                await conn.commit()
+            except Exception as finish_exc:
+                logger.error(f"Failed to mark job as failed: {finish_exc}")
+        raise
+    finally:
+        if conn is not None:
+            try:
+                await conn.rollback()
+            except Exception:
+                pass
+            try:
+                await conn.close()
+            except Exception:
+                pass
 
 
 def main():

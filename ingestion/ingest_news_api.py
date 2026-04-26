@@ -209,27 +209,49 @@ async def fetch_all_articles(days: int) -> list[dict]:
 
 
 async def main_async(days: int, from_raw: Path | None):
-    if from_raw:
-        logger.info(f"Loading from raw file: {from_raw}")
-        articles = list(iter_raw(from_raw))
-    else:
-        if not NEWSAPI_KEY:
-            logger.error("NEWS_API_KEY not set in environment.")
-            return
-        articles = await fetch_all_articles(days)
-        save_raw(articles, "news")
+    conn = None
+    job_id = None
+    try:
+        if from_raw:
+            logger.info(f"Loading from raw file: {from_raw}")
+            articles = list(iter_raw(from_raw))
+        else:
+            if not NEWSAPI_KEY:
+                logger.error("NEWS_API_KEY not set in environment.")
+                return
+            articles = await fetch_all_articles(days)
+            save_raw(articles, "news")
 
-    logger.info(f"Processing {len(articles)} unique articles…")
-    conn = await get_db_connection()
-    job_id = await create_job(conn, "news", len(articles))
-    await conn.commit()
+        logger.info(f"Processing {len(articles)} unique articles…")
+        conn = await get_db_connection()
+        job_id = await create_job(conn, "news", len(articles))
+        await conn.commit()
 
-    inserted = await ingest_articles(articles, conn)
-    await update_job_progress(conn, job_id, len(articles))
-    await finish_job(conn, job_id, "done")
-    await conn.commit()
-    await conn.close()
-    logger.info(f"NewsAPI ingestion complete: {inserted} new chunks from {len(articles)} articles")
+        inserted = await ingest_articles(articles, conn)
+        await update_job_progress(conn, job_id, len(articles))
+        await finish_job(conn, job_id, "done")
+        await conn.commit()
+        conn = None  # prevent finally from closing again
+        logger.info(f"NewsAPI ingestion complete: {inserted} new chunks from {len(articles)} articles")
+    except Exception as exc:
+        logger.error(f"news (api) ingestion failed: {exc}", exc_info=True)
+        if conn is not None and job_id is not None:
+            try:
+                await finish_job(conn, job_id, "failed", error_message=str(exc)[:500])
+                await conn.commit()
+            except Exception as finish_exc:
+                logger.error(f"Failed to mark job as failed: {finish_exc}")
+        raise
+    finally:
+        if conn is not None:
+            try:
+                await conn.rollback()
+            except Exception:
+                pass
+            try:
+                await conn.close()
+            except Exception:
+                pass
 
 
 def main():

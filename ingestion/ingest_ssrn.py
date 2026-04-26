@@ -230,23 +230,45 @@ async def process_papers(papers: list[dict], conn, job_id: int) -> int:
 
 
 async def main_async(categories: list[str], max_per_cat: int, from_raw: Path | None):
-    if from_raw:
-        logger.info(f"Loading from raw file: {from_raw}")
-        papers = list(iter_raw(from_raw))
-    else:
-        papers = await fetch_all_categories(categories, max_per_cat)
-        save_raw(papers, "ssrn")
+    conn = None
+    job_id = None
+    try:
+        if from_raw:
+            logger.info(f"Loading from raw file: {from_raw}")
+            papers = list(iter_raw(from_raw))
+        else:
+            papers = await fetch_all_categories(categories, max_per_cat)
+            save_raw(papers, "ssrn")
 
-    logger.info(f"Processing {len(papers)} SSRN preprints…")
-    conn = await get_db_connection()
-    job_id = await create_job(conn, "ssrn", len(papers))
-    await conn.commit()
+        logger.info(f"Processing {len(papers)} SSRN preprints…")
+        conn = await get_db_connection()
+        job_id = await create_job(conn, "ssrn", len(papers))
+        await conn.commit()
 
-    total = await process_papers(papers, conn, job_id)
-    await finish_job(conn, job_id, "done")
-    await conn.commit()
-    await conn.close()
-    logger.info(f"SSRN ingestion complete: {total} chunks from {len(papers)} preprints")
+        total = await process_papers(papers, conn, job_id)
+        await finish_job(conn, job_id, "done")
+        await conn.commit()
+        conn = None  # prevent finally from closing again
+        logger.info(f"SSRN ingestion complete: {total} chunks from {len(papers)} preprints")
+    except Exception as exc:
+        logger.error(f"ssrn ingestion failed: {exc}", exc_info=True)
+        if conn is not None and job_id is not None:
+            try:
+                await finish_job(conn, job_id, "failed", error_message=str(exc)[:500])
+                await conn.commit()
+            except Exception as finish_exc:
+                logger.error(f"Failed to mark job as failed: {finish_exc}")
+        raise
+    finally:
+        if conn is not None:
+            try:
+                await conn.rollback()
+            except Exception:
+                pass
+            try:
+                await conn.close()
+            except Exception:
+                pass
 
 
 def main():

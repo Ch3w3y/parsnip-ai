@@ -190,33 +190,55 @@ async def main_async(
     server: str, days: int, categories: list[str],
     limit: int | None, from_raw: Path | None,
 ):
-    if from_raw:
-        logger.info(f"Loading from raw file: {from_raw}")
-        papers = list(iter_raw(from_raw))
-    else:
-        papers = await fetch_all_papers(server, days)
-        save_raw(papers, server)
+    conn = None
+    job_id = None
+    try:
+        if from_raw:
+            logger.info(f"Loading from raw file: {from_raw}")
+            papers = list(iter_raw(from_raw))
+        else:
+            papers = await fetch_all_papers(server, days)
+            save_raw(papers, server)
 
-    if categories:
-        papers = filter_by_category(papers, categories)
-        logger.info(f"After category filter: {len(papers)} papers in {categories}")
-    if limit:
-        papers = papers[:limit]
+        if categories:
+            papers = filter_by_category(papers, categories)
+            logger.info(f"After category filter: {len(papers)} papers in {categories}")
+        if limit:
+            papers = papers[:limit]
 
-    logger.info(f"Ingesting {len(papers)} {server} papers…")
-    conn = await get_db_connection()
-    job_id = await create_job(conn, server, len(papers))
-    await conn.commit()
+        logger.info(f"Ingesting {len(papers)} {server} papers…")
+        conn = await get_db_connection()
+        job_id = await create_job(conn, server, len(papers))
+        await conn.commit()
 
-    t0 = time.time()
-    inserted = await ingest_papers(papers, conn, server, job_id)
-    await update_job_progress(conn, job_id, len(papers))
-    await finish_job(conn, job_id, "done")
-    await conn.commit()
-    await conn.close()
+        t0 = time.time()
+        inserted = await ingest_papers(papers, conn, server, job_id)
+        await update_job_progress(conn, job_id, len(papers))
+        await finish_job(conn, job_id, "done")
+        await conn.commit()
+        conn = None  # prevent finally from closing again
 
-    elapsed = time.time() - t0
-    logger.info(f"{server} ingestion complete: {inserted} new chunks from {len(papers)} papers in {elapsed:.0f}s")
+        elapsed = time.time() - t0
+        logger.info(f"{server} ingestion complete: {inserted} new chunks from {len(papers)} papers in {elapsed:.0f}s")
+    except Exception as exc:
+        logger.error(f"{server} ingestion failed: {exc}", exc_info=True)
+        if conn is not None and job_id is not None:
+            try:
+                await finish_job(conn, job_id, "failed", error_message=str(exc)[:500])
+                await conn.commit()
+            except Exception as finish_exc:
+                logger.error(f"Failed to mark job as failed: {finish_exc}")
+        raise
+    finally:
+        if conn is not None:
+            try:
+                await conn.rollback()
+            except Exception:
+                pass
+            try:
+                await conn.close()
+            except Exception:
+                pass
 
 
 def main():

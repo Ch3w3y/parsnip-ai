@@ -223,24 +223,46 @@ async def process_papers(papers: list[dict], conn, job_id: int) -> int:
 
 
 async def main_async(categories: list[str], max_per_cat: int, from_raw: Path | None):
-    if from_raw:
-        logger.info(f"Loading from raw file: {from_raw}")
-        papers = list(iter_raw(from_raw))
-    else:
-        papers = await fetch_all_categories(categories, max_per_cat)
-        save_raw(papers, "arxiv")
+    conn = None
+    job_id = None
+    try:
+        if from_raw:
+            logger.info(f"Loading from raw file: {from_raw}")
+            papers = list(iter_raw(from_raw))
+        else:
+            papers = await fetch_all_categories(categories, max_per_cat)
+            save_raw(papers, "arxiv")
 
-    logger.info(f"Processing {len(papers)} arXiv papers…")
-    conn = await get_db_connection()
-    job_id = await create_job(conn, "arxiv", len(papers))
-    await conn.commit()
+        logger.info(f"Processing {len(papers)} arXiv papers…")
+        conn = await get_db_connection()
+        job_id = await create_job(conn, "arxiv", len(papers))
+        await conn.commit()
 
-    total = await process_papers(papers, conn, job_id)
-    await update_job_progress(conn, job_id, len(papers))
-    await finish_job(conn, job_id, "done")
-    await conn.commit()
-    await conn.close()
-    logger.info(f"arXiv ingestion complete: {total} chunks from {len(papers)} papers")
+        total = await process_papers(papers, conn, job_id)
+        await update_job_progress(conn, job_id, len(papers))
+        await finish_job(conn, job_id, "done")
+        await conn.commit()
+        conn = None  # prevent finally from closing again
+        logger.info(f"arXiv ingestion complete: {total} chunks from {len(papers)} papers")
+    except Exception as exc:
+        logger.error(f"arxiv ingestion failed: {exc}", exc_info=True)
+        if conn is not None and job_id is not None:
+            try:
+                await finish_job(conn, job_id, "failed", error_message=str(exc)[:500])
+                await conn.commit()
+            except Exception as finish_exc:
+                logger.error(f"Failed to mark job as failed: {finish_exc}")
+        raise
+    finally:
+        if conn is not None:
+            try:
+                await conn.rollback()
+            except Exception:
+                pass
+            try:
+                await conn.close()
+            except Exception:
+                pass
 
 
 def main():

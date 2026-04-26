@@ -236,71 +236,93 @@ def records_to_chunks(records: list[dict]) -> list[dict]:
 
 async def process_records(records: list[dict]):
     """Phase 2: Write to forex_rates table + chunk + embed + upsert to KB."""
-    conn = await get_db_connection()
-    job_id = await create_job(conn, "forex")
-    await conn.commit()
+    conn = None
+    job_id = None
+    try:
+        conn = await get_db_connection()
+        job_id = await create_job(conn, "forex")
+        await conn.commit()
 
-    # ── 1. Write structured data to forex_rates table ────────────────────
-    rate_count = await upsert_forex_rates(conn, records)
-    logger.info(f"Upserted {rate_count} rows into forex_rates table")
+        # ── 1. Write structured data to forex_rates table ────────────────────
+        rate_count = await upsert_forex_rates(conn, records)
+        logger.info(f"Upserted {rate_count} rows into forex_rates table")
 
-    # ── 2. Create KB text chunks ─────────────────────────────────────────
-    chunks = records_to_chunks(records)
-    logger.info(f"Created {len(chunks)} forex KB chunks")
+        # ── 2. Create KB text chunks ─────────────────────────────────────────
+        chunks = records_to_chunks(records)
+        logger.info(f"Created {len(chunks)} forex KB chunks")
 
-    total_kb = 0
-    pending_texts: list[str] = []
-    pending_chunks: list[dict] = []
+        total_kb = 0
+        pending_texts: list[str] = []
+        pending_chunks: list[dict] = []
 
-    async def flush_batch():
-        nonlocal total_kb
-        if not pending_texts:
-            return
+        async def flush_batch():
+            nonlocal total_kb
+            if not pending_texts:
+                return
 
-        embeddings = await embed_batch(pending_texts)
-        if embeddings is None:
-            logger.error(f"Embedding failed for batch of {len(pending_texts)}")
+            embeddings = await embed_batch(pending_texts)
+            if embeddings is None:
+                logger.error(f"Embedding failed for batch of {len(pending_texts)}")
+                pending_texts.clear()
+                pending_chunks.clear()
+                return
+
+            bulk_rows = [
+                (
+                    "forex",
+                    chunk["source_id"],
+                    0,
+                    text,
+                    chunk["metadata"],
+                    emb,
+                    EMBED_MODEL,
+                )
+                for chunk, text, emb in zip(pending_chunks, pending_texts, embeddings)
+                if emb is not None
+            ]
+
+            inserted = await bulk_upsert_chunks(conn, bulk_rows, on_conflict="update")
+            total_kb += inserted
             pending_texts.clear()
             pending_chunks.clear()
-            return
 
-        bulk_rows = [
-            (
-                "forex",
-                chunk["source_id"],
-                0,
-                text,
-                chunk["metadata"],
-                emb,
-                EMBED_MODEL,
-            )
-            for chunk, text, emb in zip(pending_chunks, pending_texts, embeddings)
-            if emb is not None
-        ]
+        with tqdm(total=len(chunks), desc="Forex KB chunks", unit="chunk") as pbar:
+            for chunk in chunks:
+                pending_texts.append(chunk["text"])
+                pending_chunks.append(chunk)
 
-        inserted = await bulk_upsert_chunks(conn, bulk_rows, on_conflict="update")
-        total_kb += inserted
-        pending_texts.clear()
-        pending_chunks.clear()
+                if len(pending_texts) >= BATCH_SIZE:
+                    await flush_batch()
+                    pbar.update(BATCH_SIZE)
 
-    with tqdm(total=len(chunks), desc="Forex KB chunks", unit="chunk") as pbar:
-        for chunk in chunks:
-            pending_texts.append(chunk["text"])
-            pending_chunks.append(chunk)
+            await flush_batch()
+            pbar.update(len(pending_texts))
 
-            if len(pending_texts) >= BATCH_SIZE:
-                await flush_batch()
-                pbar.update(BATCH_SIZE)
+        await update_job_progress(conn, job_id, total_kb)
+        await finish_job(conn, job_id, "done")
+        await conn.commit()
+        conn = None  # prevent finally from closing again
 
-        await flush_batch()
-        pbar.update(len(pending_texts))
-
-    await update_job_progress(conn, job_id, total_kb)
-    await finish_job(conn, job_id, "done")
-    await conn.commit()
-    await conn.close()
-
-    logger.info(f"Done! {rate_count} forex_rates rows | {total_kb} KB chunks")
+        logger.info(f"Done! {rate_count} forex_rates rows | {total_kb} KB chunks")
+    except Exception as exc:
+        logger.error(f"forex ingestion failed: {exc}", exc_info=True)
+        if conn is not None and job_id is not None:
+            try:
+                await finish_job(conn, job_id, "failed", error_message=str(exc)[:500])
+                await conn.commit()
+            except Exception as finish_exc:
+                logger.error(f"Failed to mark job as failed: {finish_exc}")
+        raise
+    finally:
+        if conn is not None:
+            try:
+                await conn.rollback()
+            except Exception:
+                pass
+            try:
+                await conn.close()
+            except Exception:
+                pass
 
 
 def main():

@@ -176,41 +176,63 @@ async def process_articles(articles: list[dict], conn) -> int:
 
 
 async def main_async(days: int, limit: int | None):
-    since = datetime.now(timezone.utc) - timedelta(days=days)
-    logger.info(f"Fetching Wikipedia articles changed since {since.date()} ({days} days)…")
+    conn = None
+    job_id = None
+    try:
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+        logger.info(f"Fetching Wikipedia articles changed since {since.date()} ({days} days)…")
 
-    async with httpx.AsyncClient(
-        headers={"User-Agent": "pi-agent/1.0 (https://github.com/pi-agent; research bot)"},
-    ) as client:
-        titles = await get_changed_titles(client, since)
-        if limit:
-            titles = titles[:limit]
+        async with httpx.AsyncClient(
+            headers={"User-Agent": "pi-agent/1.0 (https://github.com/pi-agent; research bot)"},
+        ) as client:
+            titles = await get_changed_titles(client, since)
+            if limit:
+                titles = titles[:limit]
 
-        logger.info(f"Found {len(titles)} changed articles")
+            logger.info(f"Found {len(titles)} changed articles")
 
-        conn = await get_db_connection()
-        job_id = await create_job(conn, "wikipedia_update", len(titles))
-        await conn.commit()
-
-        total_inserted = 0
-        for i in range(0, len(titles), TITLES_PER_REQUEST):
-            batch_titles = titles[i:i + TITLES_PER_REQUEST]
-            articles = await fetch_article_texts(client, batch_titles)
-            n = await process_articles(articles, conn)
-            total_inserted += n
-
-            await update_job_progress(conn, job_id, i + len(batch_titles))
+            conn = await get_db_connection()
+            job_id = await create_job(conn, "wikipedia_update", len(titles))
             await conn.commit()
 
-            if i % 200 == 0 and i > 0:
-                logger.info(f"Progress: {i}/{len(titles)} titles, {total_inserted} chunks upserted")
+            total_inserted = 0
+            for i in range(0, len(titles), TITLES_PER_REQUEST):
+                batch_titles = titles[i:i + TITLES_PER_REQUEST]
+                articles = await fetch_article_texts(client, batch_titles)
+                n = await process_articles(articles, conn)
+                total_inserted += n
 
-            await asyncio.sleep(RATE_DELAY)
+                await update_job_progress(conn, job_id, i + len(batch_titles))
+                await conn.commit()
 
-    await finish_job(conn, job_id, "done")
-    await conn.commit()
-    await conn.close()
-    logger.info(f"Done: {total_inserted} chunks upserted across {len(titles)} changed articles")
+                if i % 200 == 0 and i > 0:
+                    logger.info(f"Progress: {i}/{len(titles)} titles, {total_inserted} chunks upserted")
+
+                await asyncio.sleep(RATE_DELAY)
+
+        await finish_job(conn, job_id, "done")
+        await conn.commit()
+        conn = None  # prevent finally from closing again
+        logger.info(f"Done: {total_inserted} chunks upserted across {len(titles)} changed articles")
+    except Exception as exc:
+        logger.error(f"wikipedia_update ingestion failed: {exc}", exc_info=True)
+        if conn is not None and job_id is not None:
+            try:
+                await finish_job(conn, job_id, "failed", error_message=str(exc)[:500])
+                await conn.commit()
+            except Exception as finish_exc:
+                logger.error(f"Failed to mark job as failed: {finish_exc}")
+        raise
+    finally:
+        if conn is not None:
+            try:
+                await conn.rollback()
+            except Exception:
+                pass
+            try:
+                await conn.close()
+            except Exception:
+                pass
 
 
 def main():

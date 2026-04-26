@@ -296,26 +296,48 @@ def load_feeds(args_feeds: list[str] | None, feed_file: str | None) -> list[str]
 
 
 async def main_async(feeds: list[str], feed_file: str | None, from_raw: Path | None):
-    feed_urls = load_feeds(feeds, feed_file)
-    logger.info(f"Loading {len(feed_urls)} RSS feeds…")
+    conn = None
+    job_id = None
+    try:
+        feed_urls = load_feeds(feeds, feed_file)
+        logger.info(f"Loading {len(feed_urls)} RSS feeds…")
 
-    if from_raw:
-        logger.info(f"Loading from raw file: {from_raw}")
-        articles = list(iter_raw(from_raw))
-    else:
-        articles = await fetch_all_feeds(feed_urls)
-        save_raw(articles, "rss")
+        if from_raw:
+            logger.info(f"Loading from raw file: {from_raw}")
+            articles = list(iter_raw(from_raw))
+        else:
+            articles = await fetch_all_feeds(feed_urls)
+            save_raw(articles, "rss")
 
-    logger.info(f"Processing {len(articles)} RSS articles…")
-    conn = await get_db_connection()
-    job_id = await create_job(conn, "rss", len(articles))
-    await conn.commit()
+        logger.info(f"Processing {len(articles)} RSS articles…")
+        conn = await get_db_connection()
+        job_id = await create_job(conn, "rss", len(articles))
+        await conn.commit()
 
-    total = await process_articles(articles, conn, job_id)
-    await finish_job(conn, job_id, "done")
-    await conn.commit()
-    await conn.close()
-    logger.info(f"RSS ingestion complete: {total} chunks from {len(articles)} articles")
+        total = await process_articles(articles, conn, job_id)
+        await finish_job(conn, job_id, "done")
+        await conn.commit()
+        conn = None  # prevent finally from closing again
+        logger.info(f"RSS ingestion complete: {total} chunks from {len(articles)} articles")
+    except Exception as exc:
+        logger.error(f"rss ingestion failed: {exc}", exc_info=True)
+        if conn is not None and job_id is not None:
+            try:
+                await finish_job(conn, job_id, "failed", error_message=str(exc)[:500])
+                await conn.commit()
+            except Exception as finish_exc:
+                logger.error(f"Failed to mark job as failed: {finish_exc}")
+        raise
+    finally:
+        if conn is not None:
+            try:
+                await conn.rollback()
+            except Exception:
+                pass
+            try:
+                await conn.close()
+            except Exception:
+                pass
 
 
 def main():

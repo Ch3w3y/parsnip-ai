@@ -482,23 +482,45 @@ async def process_files(files: list[dict], conn, job_id: int) -> int:
 
 
 async def main_async(repos: list[str], max_files: int, from_raw: Path | None):
-    if from_raw:
-        logger.info(f"Loading from raw file: {from_raw}")
-        files = list(iter_raw(from_raw))
-    else:
-        files = await fetch_all_repos(repos, max_files)
-        save_raw(files, "github")
+    conn = None
+    job_id = None
+    try:
+        if from_raw:
+            logger.info(f"Loading from raw file: {from_raw}")
+            files = list(iter_raw(from_raw))
+        else:
+            files = await fetch_all_repos(repos, max_files)
+            save_raw(files, "github")
 
-    logger.info(f"Processing {len(files)} GitHub files…")
-    conn = await get_db_connection()
-    job_id = await create_job(conn, "github", len(files))
-    await conn.commit()
+        logger.info(f"Processing {len(files)} GitHub files…")
+        conn = await get_db_connection()
+        job_id = await create_job(conn, "github", len(files))
+        await conn.commit()
 
-    total = await process_files(files, conn, job_id)
-    await finish_job(conn, job_id, "done")
-    await conn.commit()
-    await conn.close()
-    logger.info(f"GitHub ingestion complete: {total} chunks from {len(files)} files")
+        total = await process_files(files, conn, job_id)
+        await finish_job(conn, job_id, "done")
+        await conn.commit()
+        conn = None  # prevent finally from closing again
+        logger.info(f"GitHub ingestion complete: {total} chunks from {len(files)} files")
+    except Exception as exc:
+        logger.error(f"github ingestion failed: {exc}", exc_info=True)
+        if conn is not None and job_id is not None:
+            try:
+                await finish_job(conn, job_id, "failed", error_message=str(exc)[:500])
+                await conn.commit()
+            except Exception as finish_exc:
+                logger.error(f"Failed to mark job as failed: {finish_exc}")
+        raise
+    finally:
+        if conn is not None:
+            try:
+                await conn.rollback()
+            except Exception:
+                pass
+            try:
+                await conn.close()
+            except Exception:
+                pass
 
 
 def main():

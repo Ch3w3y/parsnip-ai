@@ -248,25 +248,47 @@ async def process_papers(papers: list[dict], conn, job_id: int) -> int:
 
 
 async def main_async(terms: list[str], max_per_term: int, from_raw: Path | None):
-    if from_raw:
-        logger.info(f"Loading from raw file: {from_raw}")
-        papers = list(iter_raw(from_raw))
-    else:
-        papers = await fetch_all_terms(terms, max_per_term)
-        save_raw(papers, "pubmed")
+    conn = None
+    job_id = None
+    try:
+        if from_raw:
+            logger.info(f"Loading from raw file: {from_raw}")
+            papers = list(iter_raw(from_raw))
+        else:
+            papers = await fetch_all_terms(terms, max_per_term)
+            save_raw(papers, "pubmed")
 
-    logger.info(f"Processing {len(papers)} PubMed articles…")
-    conn = await get_db_connection()
-    job_id = await create_job(conn, "pubmed", len(papers))
-    await conn.commit()
+        logger.info(f"Processing {len(papers)} PubMed articles…")
+        conn = await get_db_connection()
+        job_id = await create_job(conn, "pubmed", len(papers))
+        await conn.commit()
 
-    total = await process_papers(papers, conn, job_id)
-    await finish_job(conn, job_id, "done")
-    await conn.commit()
-    await conn.close()
-    logger.info(
-        f"PubMed ingestion complete: {total} chunks from {len(papers)} articles"
-    )
+        total = await process_papers(papers, conn, job_id)
+        await finish_job(conn, job_id, "done")
+        await conn.commit()
+        conn = None  # prevent finally from closing again
+        logger.info(
+            f"PubMed ingestion complete: {total} chunks from {len(papers)} articles"
+        )
+    except Exception as exc:
+        logger.error(f"pubmed ingestion failed: {exc}", exc_info=True)
+        if conn is not None and job_id is not None:
+            try:
+                await finish_job(conn, job_id, "failed", error_message=str(exc)[:500])
+                await conn.commit()
+            except Exception as finish_exc:
+                logger.error(f"Failed to mark job as failed: {finish_exc}")
+        raise
+    finally:
+        if conn is not None:
+            try:
+                await conn.rollback()
+            except Exception:
+                pass
+            try:
+                await conn.close()
+            except Exception:
+                pass
 
 
 def main():
