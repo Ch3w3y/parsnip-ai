@@ -287,11 +287,41 @@ async def create_job(conn, source: str, total: int | None = None) -> int:
     return row[0]
 
 
-async def finish_job(conn, job_id: int, status: str = "done"):
-    await conn.execute(
-        "UPDATE ingestion_jobs SET status = %s, finished_at = NOW() WHERE id = %s",
-        (status, job_id),
+async def finish_job(
+    conn,
+    job_id: int,
+    status: str = "done",
+    *,
+    error_message: str | None = None,
+    failed_count: int | None = None,
+):
+    """Mark an ingestion job as done or failed.
+
+    Columns written on every call:
+      - status, finished_at
+    When status='failed':
+      - error_message (last error), failed_count
+    duration_ms is always computed from started_at → finished_at.
+    """
+    sets = ["status = %s", "finished_at = NOW()"]
+    params: list = [status]
+
+    sets.append(
+        "duration_ms = EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000"
     )
+
+    if status == "failed" or error_message is not None:
+        sets.append("error_message = %s")
+        params.append(error_message)
+
+    if failed_count is not None:
+        sets.append("failed_count = %s")
+        params.append(failed_count)
+
+    params.append(job_id)
+
+    sql = f"UPDATE ingestion_jobs SET {', '.join(sets)} WHERE id = %s"
+    await conn.execute(sql, params)
 
 
 async def recover_stuck_jobs(conn, timeout_hours: float = None) -> int:
@@ -320,11 +350,13 @@ async def recover_stuck_jobs(conn, timeout_hours: float = None) -> int:
     if not stuck_rows:
         return 0
 
-    # Mark them as failed
     result = await conn.execute(
         f"""
         UPDATE ingestion_jobs
-        SET status = 'failed', finished_at = NOW()
+        SET status = 'failed',
+            finished_at = NOW(),
+            error_message = 'Job timed out after {timeout_hours} hours',
+            duration_ms = EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000
         WHERE status = 'running'
           AND started_at < NOW() - INTERVAL '{timeout_hours} hours'
         """

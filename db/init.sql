@@ -51,14 +51,17 @@ CREATE INDEX IF NOT EXISTS knowledge_chunks_user_id_idx
 
 -- ── Ingestion progress tracking ───────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS ingestion_jobs (
-    id          SERIAL PRIMARY KEY,
-    source      TEXT        NOT NULL,
-    status      TEXT        NOT NULL DEFAULT 'pending',  -- pending|running|done|failed
-    total       INTEGER,
-    processed   INTEGER     NOT NULL DEFAULT 0,
-    started_at  TIMESTAMPTZ,
-    finished_at TIMESTAMPTZ,
-    metadata    JSONB       NOT NULL DEFAULT '{}'
+    id              SERIAL PRIMARY KEY,
+    source          TEXT        NOT NULL,
+    status          TEXT        NOT NULL DEFAULT 'pending',  -- pending|running|done|failed
+    total           INTEGER,
+    processed       INTEGER     NOT NULL DEFAULT 0,
+    started_at      TIMESTAMPTZ,
+    finished_at     TIMESTAMPTZ,
+    error_message   TEXT,                                  -- last error for failed jobs
+    failed_count    INTEGER     NOT NULL DEFAULT 0,         -- per-job failure count
+    duration_ms     INTEGER,                                -- auto-calculated: finished_at - started_at
+    metadata        JSONB       NOT NULL DEFAULT '{}'
 );
 
 -- ── Agent long-term memory (4-layer stack inspired by MemPalace) ──────────────
