@@ -23,6 +23,9 @@ from pathlib import Path
 import httpx
 from dotenv import load_dotenv
 
+from structured_logging import configure_basic_logging, get_ingestion_logger, set_correlation_id
+from tracing import get_tracer, set_span_error
+from lineage import emit_dlq_lineage, emit_job_lineage
 from utils import (
     compute_content_hash,
     embed_batch,
@@ -35,12 +38,17 @@ from utils import (
     save_raw,
     iter_raw,
     latest_raw,
+    start_metrics_server,
+    INGESTION_CHUNKS_PROCESSED,
+    INGESTION_JOBS_FAILED,
+    INGESTION_DLQ_MESSAGES,
 )
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger(__name__)
+configure_basic_logging("biorxiv")
+logger = get_ingestion_logger("biorxiv")
+_tracer = get_tracer("parsnip.ingestion.biorxiv")
 
 API_BASE = "https://api.biorxiv.org/details"
 BATCH_SIZE = 32
@@ -193,6 +201,9 @@ async def main_async(
     server: str, days: int, categories: list[str],
     limit: int | None, from_raw: Path | None,
 ):
+    start_metrics_server()
+    with _tracer.start_as_current_span("ingest_biorxiv") as span:
+        span.set_attribute("source", server)
     conn = None
     job_id = None
     try:
@@ -212,11 +223,15 @@ async def main_async(
         logger.info(f"Ingesting {len(papers)} {server} papers…")
         conn = await get_db_connection()
         job_id = await create_job(conn, server, len(papers))
+        set_correlation_id(str(job_id))
+        span.set_attribute("correlation_id", str(job_id))
         await conn.commit()
 
         t0 = time.time()
         inserted = await ingest_papers(papers, conn, server, job_id)
+        INGESTION_CHUNKS_PROCESSED.labels(source=server, status="success").inc(inserted)
         await update_job_progress(conn, job_id, len(papers))
+        await emit_job_lineage(conn, job_id)
         await finish_job(conn, job_id, "done")
         await conn.commit()
         conn = None  # prevent finally from closing again
@@ -224,17 +239,22 @@ async def main_async(
         elapsed = time.time() - t0
         logger.info(f"{server} ingestion complete: {inserted} new chunks from {len(papers)} papers in {elapsed:.0f}s")
     except Exception as exc:
+        set_span_error(span, exc)
         logger.error(f"{server} ingestion failed: {exc}", exc_info=True)
+        INGESTION_JOBS_FAILED.labels(source=server).inc()
         if conn is not None and job_id is not None:
             try:
                 await write_to_dlq(conn, source=server, source_id=f"job:{job_id}",
                                    content=None, metadata={"job_id": job_id}, error=exc)
+                INGESTION_DLQ_MESSAGES.labels(source=server).inc()
+                await emit_dlq_lineage(conn, source=server, job_id=job_id)
                 await finish_job(conn, job_id, "failed", error_message=str(exc)[:500])
                 await conn.commit()
             except Exception as finish_exc:
                 logger.error(f"Failed to mark job as failed: {finish_exc}")
         raise
     finally:
+        set_correlation_id(None)
         if conn is not None:
             try:
                 await conn.rollback()

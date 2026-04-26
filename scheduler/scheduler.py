@@ -22,6 +22,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from dotenv import load_dotenv
 
 from ingestion.registry import SourceRegistry
+from ingestion.alerting import run_all_checks
 from ingestion.utils import get_db_connection, recover_stuck_jobs
 from registry_adapter import run_source
 
@@ -415,6 +416,25 @@ async def run_failed_retries():
                 pass
 
 
+async def pipeline_health_check():
+    """Run alerting threshold checks every 5 minutes and dispatch alerts."""
+    try:
+        conn = await get_db_connection()
+        alerts = await run_all_checks(conn)
+        critical = sum(1 for a in alerts if a.level.value == "critical")
+        warn = sum(1 for a in alerts if a.level.value == "warn")
+        if critical or warn:
+            logger.warning(
+                f"Pipeline health check: {len(alerts)} alert(s) "
+                f"({critical} critical, {warn} warn)"
+            )
+        else:
+            logger.info("Pipeline health check: all clear")
+        await conn.close()
+    except Exception as e:
+        logger.warning(f"Pipeline health check failed: {e}")
+
+
 async def main():
     scheduler = AsyncIOScheduler()
 
@@ -473,6 +493,11 @@ async def main():
         IntervalTrigger(hours=STUCK_RECOVERY_INTERVAL_HOURS),
         id="stuck_job_recovery",
     )
+    scheduler.add_job(
+        pipeline_health_check,
+        IntervalTrigger(minutes=5),
+        id="pipeline_health",
+    )
 
     scheduler.start()
     logger.info(
@@ -482,7 +507,8 @@ async def main():
         "kb_incremental=hourly@:15 | kb_full=Sun@02:30 | "
         "volume_sync=daily@04:30 | config_backup=daily@01:00 | "
         f"retry_failed=every {RETRY_INTERVAL_MINUTES}min | "
-        f"stuck_recovery=every {STUCK_RECOVERY_INTERVAL_HOURS}h"
+        f"stuck_recovery=every {STUCK_RECOVERY_INTERVAL_HOURS}h | "
+        f"pipeline_health=every 5min"
     )
     logger.info(
         "Wikipedia updates are gated — will not run until dump seed is marked done in ingestion_jobs."

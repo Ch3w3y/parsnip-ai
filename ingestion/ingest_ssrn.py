@@ -21,6 +21,9 @@ from pathlib import Path
 import httpx
 from dotenv import load_dotenv
 
+from structured_logging import configure_basic_logging, get_ingestion_logger, set_correlation_id
+from tracing import get_tracer, set_span_error
+from lineage import emit_dlq_lineage, emit_job_lineage
 from utils import (
     chunk_text,
     compute_content_hash,
@@ -35,12 +38,17 @@ from utils import (
     save_raw,
     iter_raw,
     latest_raw,
+    start_metrics_server,
+    INGESTION_CHUNKS_PROCESSED,
+    INGESTION_JOBS_FAILED,
+    INGESTION_DLQ_MESSAGES,
 )
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger(__name__)
+configure_basic_logging("ssrn")
+logger = get_ingestion_logger("ssrn")
+_tracer = get_tracer("parsnip.ingestion.ssrn")
 
 OPENALEX_URL = "https://api.openalex.org/works"
 BATCH_SIZE = 32
@@ -244,6 +252,9 @@ async def process_papers(papers: list[dict], conn, job_id: int) -> int:
 
 
 async def main_async(categories: list[str], max_per_cat: int, from_raw: Path | None):
+    start_metrics_server()
+    with _tracer.start_as_current_span("ingest_ssrn") as span:
+        span.set_attribute("source", "ssrn")
     conn = None
     job_id = None
     try:
@@ -257,25 +268,34 @@ async def main_async(categories: list[str], max_per_cat: int, from_raw: Path | N
         logger.info(f"Processing {len(papers)} SSRN preprints…")
         conn = await get_db_connection()
         job_id = await create_job(conn, "ssrn", len(papers))
+        set_correlation_id(str(job_id))
+        span.set_attribute("correlation_id", str(job_id))
         await conn.commit()
 
         total = await process_papers(papers, conn, job_id)
+        INGESTION_CHUNKS_PROCESSED.labels(source="ssrn", status="success").inc(total)
+        await emit_job_lineage(conn, job_id)
         await finish_job(conn, job_id, "done")
         await conn.commit()
         conn = None  # prevent finally from closing again
         logger.info(f"SSRN ingestion complete: {total} chunks from {len(papers)} preprints")
     except Exception as exc:
+        set_span_error(span, exc)
         logger.error(f"ssrn ingestion failed: {exc}", exc_info=True)
+        INGESTION_JOBS_FAILED.labels(source="ssrn").inc()
         if conn is not None and job_id is not None:
             try:
                 await write_to_dlq(conn, source="ssrn", source_id=f"job:{job_id}",
                                    content=None, metadata={"job_id": job_id}, error=exc)
+                INGESTION_DLQ_MESSAGES.labels(source="ssrn").inc()
+                await emit_dlq_lineage(conn, source="ssrn", job_id=job_id)
                 await finish_job(conn, job_id, "failed", error_message=str(exc)[:500])
                 await conn.commit()
             except Exception as finish_exc:
                 logger.error(f"Failed to mark job as failed: {finish_exc}")
         raise
     finally:
+        set_correlation_id(None)
         if conn is not None:
             try:
                 await conn.rollback()

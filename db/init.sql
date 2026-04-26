@@ -259,3 +259,22 @@ CREATE TABLE IF NOT EXISTS thread_metadata (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ── Lineage events (OpenLineage-lite) ──────────────────────────────────────────
+-- Tracks data flow through the ingestion pipeline: which source produced what,
+-- how many records, and when.  Lightweight metadata — not on the critical path.
+CREATE TABLE IF NOT EXISTS lineage_events (
+    id              SERIAL      PRIMARY KEY,
+    run_id          TEXT        NOT NULL,
+    source          TEXT        NOT NULL,
+    job_id          INTEGER     REFERENCES ingestion_jobs(id),
+    timestamp       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    input_type      TEXT,
+    output_type     TEXT,
+    record_count    INTEGER,
+    schema_version  TEXT,
+    metadata        JSONB
+);
+
+CREATE INDEX IF NOT EXISTS lineage_events_source_timestamp_idx
+    ON lineage_events (source, timestamp);

@@ -24,6 +24,9 @@ from pathlib import Path
 import httpx
 from dotenv import load_dotenv
 
+from structured_logging import configure_basic_logging, get_ingestion_logger, set_correlation_id
+from tracing import get_tracer, set_span_error
+from lineage import emit_dlq_lineage, emit_job_lineage
 from utils import (
     chunk_text,
     compute_content_hash,
@@ -34,12 +37,17 @@ from utils import (
     finish_job,
     update_job_progress,
     write_to_dlq,
+    start_metrics_server,
+    INGESTION_CHUNKS_PROCESSED,
+    INGESTION_JOBS_FAILED,
+    INGESTION_DLQ_MESSAGES,
 )
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger(__name__)
+configure_basic_logging("news")
+logger = get_ingestion_logger("news")
+_tracer = get_tracer("parsnip.ingestion.news")
 
 BATCH_SIZE = 16  # smaller than arXiv — articles are longer
 RATE_DELAY = 1.0  # seconds between API calls (news sources vary)
@@ -256,6 +264,9 @@ async def ingest_articles(
 
 
 async def main_async(categories: list[str], days: int, fetch_full: bool):
+    start_metrics_server()
+    with _tracer.start_as_current_span("ingest_news") as span:
+        span.set_attribute("source", "news")
     conn = None
     job_id = None
     try:
@@ -295,29 +306,38 @@ async def main_async(categories: list[str], days: int, fetch_full: bool):
 
         conn = await get_db_connection()
         job_id = await create_job(conn, "news", len(unique))
+        set_correlation_id(str(job_id))
+        span.set_attribute("correlation_id", str(job_id))
         await conn.commit()
 
         total_inserted = [0]
         await ingest_articles(unique, conn, job_id, fetch_full, total_inserted)
 
         await update_job_progress(conn, job_id, len(unique))
+        INGESTION_CHUNKS_PROCESSED.labels(source="news", status="success").inc(total_inserted[0])
+        await emit_job_lineage(conn, job_id)
         await finish_job(conn, job_id, "done")
         await conn.commit()
         conn = None  # prevent finally from closing again
 
         logger.info(f"News ingestion complete: {total_inserted[0]} new chunks from {len(unique)} articles")
     except Exception as exc:
+        set_span_error(span, exc)
         logger.error(f"news ingestion failed: {exc}", exc_info=True)
+        INGESTION_JOBS_FAILED.labels(source="news").inc()
         if conn is not None and job_id is not None:
             try:
                 await write_to_dlq(conn, source="news", source_id=f"job:{job_id}",
                                    content=None, metadata={"job_id": job_id}, error=exc)
+                INGESTION_DLQ_MESSAGES.labels(source="news").inc()
+                await emit_dlq_lineage(conn, source="news", job_id=job_id)
                 await finish_job(conn, job_id, "failed", error_message=str(exc)[:500])
                 await conn.commit()
             except Exception as finish_exc:
                 logger.error(f"Failed to mark job as failed: {finish_exc}")
         raise
     finally:
+        set_correlation_id(None)
         if conn is not None:
             try:
                 await conn.rollback()

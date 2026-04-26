@@ -33,11 +33,15 @@ import psycopg
 from dotenv import load_dotenv
 from pgvector.psycopg import register_vector_async
 
-from utils import cleanup_orphan_chunks, compute_content_hash, write_to_dlq
+from structured_logging import configure_basic_logging, get_ingestion_logger, set_correlation_id
+from tracing import get_tracer, set_span_error
+from lineage import emit_dlq_lineage, emit_job_lineage
+from utils import cleanup_orphan_chunks, compute_content_hash, write_to_dlq, start_metrics_server, INGESTION_CHUNKS_PROCESSED, INGESTION_JOBS_FAILED, INGESTION_DLQ_MESSAGES
 
 load_dotenv()
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger(__name__)
+configure_basic_logging("joplin_notes")
+logger = get_ingestion_logger("joplin_notes")
+_tracer = get_tracer("parsnip.ingestion.joplin")
 
 JOPLIN_URL = os.environ.get("JOPLIN_SERVER_URL", "http://localhost:22300")
 JOPLIN_EMAIL = os.environ.get("JOPLIN_ADMIN_EMAIL", "")
@@ -229,6 +233,7 @@ async def _get_last_sync_ms(conn) -> int:
 
 
 async def main_async(full: bool = False, user_id_override: str | None = None):
+    start_metrics_server()
     if not JOPLIN_EMAIL or not JOPLIN_PASS:
         logger.error("JOPLIN_ADMIN_EMAIL and JOPLIN_ADMIN_PASSWORD must be set in .env")
         sys.exit(1)
@@ -242,6 +247,9 @@ async def main_async(full: bool = False, user_id_override: str | None = None):
                 "Is the joplin-server container running? Check: docker compose ps"
             )
             sys.exit(1)
+
+        with _tracer.start_as_current_span("ingest_joplin") as span:
+            span.set_attribute("source", "joplin_notes")
 
         # user_id for KB tagging: explicit override → Joplin user_id → None (org-wide)
         kb_user_id = user_id_override or user_id or None
@@ -274,6 +282,8 @@ async def main_async(full: bool = False, user_id_override: str | None = None):
                 )
             ).fetchone()
             job_id = job_row[0]
+            set_correlation_id(str(job_id))
+            span.set_attribute("correlation_id", str(job_id))
             await conn.commit()
 
             processed = 0
@@ -298,10 +308,12 @@ async def main_async(full: bool = False, user_id_override: str | None = None):
                         continue
                     raw_content = r.content
                 except Exception as e:
-                    logger.warning(f"Could not fetch note {note_id}: {e}")
+                    logger.warning(f"Could not fetch note {note_id}: {e}", extra={"source_id": note_id})
                     try:
                         await write_to_dlq(conn, source="joplin_notes", source_id=note_id,
                                            content=None, metadata={"note_id": note_id}, error=e)
+                        INGESTION_DLQ_MESSAGES.labels(source="joplin_notes").inc()
+                        await emit_dlq_lineage(conn, source="joplin_notes", job_id=job_id)
                         await conn.commit()
                     except Exception:
                         pass
@@ -360,6 +372,8 @@ async def main_async(full: bool = False, user_id_override: str | None = None):
 
                 await cleanup_orphan_chunks(conn, "joplin_notes", note_id, len(chunks))
 
+                INGESTION_CHUNKS_PROCESSED.labels(source="joplin_notes", status="success").inc(len(chunks))
+
                 processed += 1
                 if processed % 25 == 0:
                     logger.info(f"  {processed}/{len(note_items)} notes synced")
@@ -380,9 +394,11 @@ async def main_async(full: bool = False, user_id_override: str | None = None):
                 """,
                 (processed, sync_start_ms, job_id),
             )
+            await emit_job_lineage(conn, job_id)
             await conn.commit()
 
     logger.info(f"Joplin sync complete — {processed} note(s) ingested.")
+    set_correlation_id(None)
 
 
 if __name__ == "__main__":

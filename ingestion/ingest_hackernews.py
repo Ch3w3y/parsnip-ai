@@ -21,6 +21,9 @@ import httpx
 from dotenv import load_dotenv
 from tqdm import tqdm
 
+from structured_logging import configure_basic_logging, get_ingestion_logger, set_correlation_id
+from tracing import get_tracer, set_span_error
+from lineage import emit_dlq_lineage, emit_job_lineage
 from utils import (
     chunk_text,
     compute_content_hash,
@@ -35,12 +38,17 @@ from utils import (
     save_raw,
     iter_raw,
     latest_raw,
+    start_metrics_server,
+    INGESTION_CHUNKS_PROCESSED,
+    INGESTION_JOBS_FAILED,
+    INGESTION_DLQ_MESSAGES,
 )
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger(__name__)
+configure_basic_logging("hackernews")
+logger = get_ingestion_logger("hackernews")
+_tracer = get_tracer("parsnip.ingestion.hackernews")
 
 HN_API = "https://hacker-news.firebaseio.com/v0"
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "mxbai-embed-large")
@@ -213,6 +221,9 @@ async def process_stories(stories: list[dict], conn, job_id: int) -> int:
 
 
 async def main_async(story_type: str, limit: int, from_raw: Path | None):
+    start_metrics_server()
+    with _tracer.start_as_current_span("ingest_hackernews") as span:
+        span.set_attribute("source", "hackernews")
     conn = None
     job_id = None
     try:
@@ -226,9 +237,13 @@ async def main_async(story_type: str, limit: int, from_raw: Path | None):
         logger.info(f"Processing {len(stories)} HN stories...")
         conn = await get_db_connection()
         job_id = await create_job(conn, "hackernews", len(stories))
+        set_correlation_id(str(job_id))
+        span.set_attribute("correlation_id", str(job_id))
         await conn.commit()
 
         total = await process_stories(stories, conn, job_id)
+        INGESTION_CHUNKS_PROCESSED.labels(source="hackernews", status="success").inc(total)
+        await emit_job_lineage(conn, job_id)
         await finish_job(conn, job_id, "done")
         await conn.commit()
         conn = None  # prevent finally from closing again
@@ -236,17 +251,22 @@ async def main_async(story_type: str, limit: int, from_raw: Path | None):
             f"Hacker News ingestion complete: {total} chunks from {len(stories)} stories"
         )
     except Exception as exc:
+        set_span_error(span, exc)
         logger.error(f"hackernews ingestion failed: {exc}", exc_info=True)
+        INGESTION_JOBS_FAILED.labels(source="hackernews").inc()
         if conn is not None and job_id is not None:
             try:
                 await write_to_dlq(conn, source="hackernews", source_id=f"job:{job_id}",
                                    content=None, metadata={"job_id": job_id}, error=exc)
+                INGESTION_DLQ_MESSAGES.labels(source="hackernews").inc()
+                await emit_dlq_lineage(conn, source="hackernews", job_id=job_id)
                 await finish_job(conn, job_id, "failed", error_message=str(exc)[:500])
                 await conn.commit()
             except Exception as finish_exc:
                 logger.error(f"Failed to mark job as failed: {finish_exc}")
         raise
     finally:
+        set_correlation_id(None)
         if conn is not None:
             try:
                 await conn.rollback()

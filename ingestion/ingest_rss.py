@@ -27,6 +27,9 @@ from xml.etree import ElementTree as ET
 import httpx
 from dotenv import load_dotenv
 
+from structured_logging import configure_basic_logging, get_ingestion_logger, set_correlation_id
+from tracing import get_tracer, set_span_error
+from lineage import emit_dlq_lineage, emit_job_lineage
 from utils import (
     chunk_text,
     compute_content_hash,
@@ -41,12 +44,17 @@ from utils import (
     save_raw,
     iter_raw,
     latest_raw,
+    start_metrics_server,
+    INGESTION_CHUNKS_PROCESSED,
+    INGESTION_JOBS_FAILED,
+    INGESTION_DLQ_MESSAGES,
 )
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger(__name__)
+configure_basic_logging("rss")
+logger = get_ingestion_logger("rss")
+_tracer = get_tracer("parsnip.ingestion.rss")
 
 BATCH_SIZE = 32
 DEFAULT_FEEDS_FILE = Path(__file__).parent / "data" / "rss_feeds.json"
@@ -312,6 +320,9 @@ def load_feeds(args_feeds: list[str] | None, feed_file: str | None) -> list[str]
 
 
 async def main_async(feeds: list[str], feed_file: str | None, from_raw: Path | None):
+    start_metrics_server()
+    with _tracer.start_as_current_span("ingest_rss") as span:
+        span.set_attribute("source", "rss")
     conn = None
     job_id = None
     try:
@@ -328,25 +339,34 @@ async def main_async(feeds: list[str], feed_file: str | None, from_raw: Path | N
         logger.info(f"Processing {len(articles)} RSS articles…")
         conn = await get_db_connection()
         job_id = await create_job(conn, "rss", len(articles))
+        set_correlation_id(str(job_id))
+        span.set_attribute("correlation_id", str(job_id))
         await conn.commit()
 
         total = await process_articles(articles, conn, job_id)
+        INGESTION_CHUNKS_PROCESSED.labels(source="rss", status="success").inc(total)
+        await emit_job_lineage(conn, job_id)
         await finish_job(conn, job_id, "done")
         await conn.commit()
         conn = None  # prevent finally from closing again
         logger.info(f"RSS ingestion complete: {total} chunks from {len(articles)} articles")
     except Exception as exc:
+        set_span_error(span, exc)
         logger.error(f"rss ingestion failed: {exc}", exc_info=True)
+        INGESTION_JOBS_FAILED.labels(source="rss").inc()
         if conn is not None and job_id is not None:
             try:
                 await write_to_dlq(conn, source="rss", source_id=f"job:{job_id}",
                                    content=None, metadata={"job_id": job_id}, error=exc)
+                INGESTION_DLQ_MESSAGES.labels(source="rss").inc()
+                await emit_dlq_lineage(conn, source="rss", job_id=job_id)
                 await finish_job(conn, job_id, "failed", error_message=str(exc)[:500])
                 await conn.commit()
             except Exception as finish_exc:
                 logger.error(f"Failed to mark job as failed: {finish_exc}")
         raise
     finally:
+        set_correlation_id(None)
         if conn is not None:
             try:
                 await conn.rollback()

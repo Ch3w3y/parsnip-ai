@@ -20,6 +20,9 @@ from pathlib import Path
 import httpx
 from dotenv import load_dotenv
 
+from structured_logging import configure_basic_logging, get_ingestion_logger, set_correlation_id
+from tracing import get_tracer, set_span_error
+from lineage import emit_dlq_lineage, emit_job_lineage
 from utils import (
     chunk_text,
     compute_content_hash,
@@ -30,12 +33,17 @@ from utils import (
     finish_job,
     update_job_progress,
     write_to_dlq,
+    start_metrics_server,
+    INGESTION_CHUNKS_PROCESSED,
+    INGESTION_JOBS_FAILED,
+    INGESTION_DLQ_MESSAGES,
 )
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger(__name__)
+configure_basic_logging("wikipedia_updates")
+logger = get_ingestion_logger("wikipedia_updates")
+_tracer = get_tracer("parsnip.ingestion.wikipedia_updates")
 
 WIKI_API = "https://en.wikipedia.org/w/api.php"
 BATCH_SIZE = 32       # chunks per embed call
@@ -184,6 +192,9 @@ async def process_articles(articles: list[dict], conn) -> int:
 
 
 async def main_async(days: int, limit: int | None):
+    start_metrics_server()
+    with _tracer.start_as_current_span("ingest_wikipedia_updates") as span:
+        span.set_attribute("source", "wikipedia_update")
     conn = None
     job_id = None
     try:
@@ -201,6 +212,8 @@ async def main_async(days: int, limit: int | None):
 
             conn = await get_db_connection()
             job_id = await create_job(conn, "wikipedia_update", len(titles))
+            set_correlation_id(str(job_id))
+            span.set_attribute("correlation_id", str(job_id))
             await conn.commit()
 
             total_inserted = 0
@@ -219,21 +232,28 @@ async def main_async(days: int, limit: int | None):
                 await asyncio.sleep(RATE_DELAY)
 
         await finish_job(conn, job_id, "done")
+        INGESTION_CHUNKS_PROCESSED.labels(source="wikipedia", status="success").inc(total_inserted)
+        await emit_job_lineage(conn, job_id)
         await conn.commit()
         conn = None  # prevent finally from closing again
         logger.info(f"Done: {total_inserted} chunks upserted across {len(titles)} changed articles")
     except Exception as exc:
+        set_span_error(span, exc)
         logger.error(f"wikipedia_update ingestion failed: {exc}", exc_info=True)
+        INGESTION_JOBS_FAILED.labels(source="wikipedia_update").inc()
         if conn is not None and job_id is not None:
             try:
                 await write_to_dlq(conn, source="wikipedia", source_id=f"job:{job_id}",
                                    content=None, metadata={"job_id": job_id}, error=exc)
+                INGESTION_DLQ_MESSAGES.labels(source="wikipedia").inc()
+                await emit_dlq_lineage(conn, source="wikipedia_update", job_id=job_id)
                 await finish_job(conn, job_id, "failed", error_message=str(exc)[:500])
                 await conn.commit()
             except Exception as finish_exc:
                 logger.error(f"Failed to mark job as failed: {finish_exc}")
         raise
     finally:
+        set_correlation_id(None)
         if conn is not None:
             try:
                 await conn.rollback()

@@ -8,6 +8,7 @@ import hashlib
 import json
 import logging
 import os
+import threading
 import time
 from datetime import datetime, timezone
 from enum import Enum
@@ -24,9 +25,149 @@ except ImportError:
     asyncpg = None  # type: ignore[assignment]
 from pgvector.psycopg import register_vector_async
 
+from tracing import (
+    trace_embed_batch,
+    trace_upsert_chunks,
+    trace_bulk_upsert_chunks,
+    trace_job,
+    trace_dlq,
+)
+
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 logger = logging.getLogger(__name__)
+
+
+# ── Prometheus metrics ─────────────────────────────────────────────────────────
+# Safe to re-import: lazy init with catch for CollectorRegistry duplicate errors.
+
+_METRICS_INITIALIZED = False
+_INGESTION_CHUNKS_PROCESSED = None
+_INGESTION_JOBS_FAILED = None
+_INGESTION_DLQ_MESSAGES = None
+_EMBED_BATCH_DURATION = None
+_DB_WRITE_DURATION = None
+
+
+def _init_metrics() -> None:
+    global _METRICS_INITIALIZED, _INGESTION_CHUNKS_PROCESSED, _INGESTION_JOBS_FAILED
+    global _INGESTION_DLQ_MESSAGES, _EMBED_BATCH_DURATION, _DB_WRITE_DURATION
+    if _METRICS_INITIALIZED:
+        return
+    try:
+        from prometheus_client import Counter, Histogram
+        _INGESTION_CHUNKS_PROCESSED = Counter(
+            "ingestion_chunks_processed_total",
+            "Total number of chunk records written to the database",
+            ["source", "status"],
+        )
+        _INGESTION_JOBS_FAILED = Counter(
+            "ingestion_jobs_failed_total",
+            "Total number of ingestion jobs that failed",
+            ["source"],
+        )
+        _INGESTION_DLQ_MESSAGES = Counter(
+            "ingestion_dlq_messages_total",
+            "Total number of messages written to the dead-letter queue",
+            ["source"],
+        )
+        _EMBED_BATCH_DURATION = Histogram(
+            "embed_batch_duration_seconds",
+            "Duration of embed_batch() calls in seconds",
+            buckets=[0.1, 0.5, 1, 2, 5, 10, 30],
+        )
+        _DB_WRITE_DURATION = Histogram(
+            "db_write_duration_seconds",
+            "Duration of database write (upsert_chunks/bulk_upsert_chunks) calls in seconds",
+            buckets=[0.01, 0.05, 0.1, 0.5, 1, 2, 5],
+        )
+    except (ImportError, ValueError):
+        pass
+    _METRICS_INITIALIZED = True
+
+
+class _NoopCounter:
+    def labels(self, *a, **kw): return self
+    def inc(self, *a, **kw): pass
+
+
+class _NoopHistogram:
+    def observe(self, *a, **kw): pass
+
+
+class _LazyCounter:
+    def __init__(self, name: str):
+        self._name = name
+        self._real = None
+
+    def _resolve(self):
+        _init_metrics()
+        if self._real is None:
+            mapping = {
+                "chunks_processed": _INGESTION_CHUNKS_PROCESSED,
+                "jobs_failed": _INGESTION_JOBS_FAILED,
+                "dlq_messages": _INGESTION_DLQ_MESSAGES,
+            }
+            self._real = mapping.get(self._name) or _NoopCounter()
+        return self._real
+
+    def labels(self, *a, **kw):
+        return self._resolve().labels(*a, **kw)
+
+    def inc(self, *a, **kw):
+        self._resolve().inc(*a, **kw)
+
+
+class _LazyHistogram:
+    def __init__(self, name: str):
+        self._name = name
+        self._real = None
+
+    def _resolve(self):
+        _init_metrics()
+        if self._real is None:
+            mapping = {
+                "embed_batch": _EMBED_BATCH_DURATION,
+                "db_write": _DB_WRITE_DURATION,
+            }
+            self._real = mapping.get(self._name) or _NoopHistogram()
+        return self._real
+
+    def observe(self, *a, **kw):
+        self._resolve().observe(*a, **kw)
+
+
+INGESTION_CHUNKS_PROCESSED = _LazyCounter("chunks_processed")
+INGESTION_JOBS_FAILED = _LazyCounter("jobs_failed")
+INGESTION_DLQ_MESSAGES = _LazyCounter("dlq_messages")
+EMBED_BATCH_DURATION = _LazyHistogram("embed_batch")
+DB_WRITE_DURATION = _LazyHistogram("db_write")
+
+_metrics_server_started = False
+
+
+def start_metrics_server() -> None:
+    """Start the Prometheus metrics HTTP server in a background thread.
+
+    Port is read from the METRICS_PORT environment variable (default: 9090).
+    Safe to call multiple times — only starts once.
+    """
+    global _metrics_server_started
+    if _metrics_server_started:
+        return
+    try:
+        from prometheus_client import start_http_server
+    except ImportError:
+        logger.debug("prometheus_client not installed; skipping metrics server")
+        return
+    port = int(os.environ.get("METRICS_PORT", "9090"))
+    try:
+        t = threading.Thread(target=start_http_server, args=(port,), daemon=True)
+        t.start()
+        _metrics_server_started = True
+        logger.info(f"Prometheus metrics server started on port {port}")
+    except Exception as e:
+        logger.warning(f"Failed to start metrics server on port {port}: {e}")
 
 
 # ── Circuit breaker for Ollama embedding endpoint ──────────────────────────────
@@ -244,6 +385,7 @@ def clean_text(text: str) -> str:
     return cleaned[:2000]  # hard cap: ~500 tokens for mxbai-embed-large
 
 
+@trace_embed_batch
 async def embed_batch(
     texts: list[str], retries: int = 3, model: str | None = None
 ) -> list[list[float]] | None:
@@ -264,6 +406,7 @@ async def embed_batch(
     if not cleaned:
         return None
 
+    t0 = time.monotonic()
     last_exc: Exception | None = None
     for attempt in range(retries):
         try:
@@ -274,6 +417,7 @@ async def embed_batch(
                 )
                 r.raise_for_status()
                 await _embed_cb.record_success()
+                EMBED_BATCH_DURATION.observe(time.monotonic() - t0)
                 return [[float(v) for v in emb] for emb in r.json()["embeddings"]]
         except httpx.HTTPStatusError as e:
             last_exc = e
@@ -306,7 +450,9 @@ async def embed_batch(
                         embeddings.append(None)
                 if any(e is not None for e in embeddings):
                     await _embed_cb.record_success()
+                    EMBED_BATCH_DURATION.observe(time.monotonic() - t0)
                     return embeddings
+                EMBED_BATCH_DURATION.observe(time.monotonic() - t0)
                 return None
 
             wait = 2**attempt
@@ -326,6 +472,7 @@ async def embed_batch(
 
     if last_exc is not None:
         await _embed_cb.record_failure(last_exc)
+    EMBED_BATCH_DURATION.observe(time.monotonic() - t0)
     return None
 
 
@@ -336,6 +483,7 @@ async def get_db_connection():
     return conn
 
 
+@trace_upsert_chunks
 async def upsert_chunks(
     conn,
     source: str,
@@ -353,6 +501,7 @@ async def upsert_chunks(
     row's content_hash. When the hash matches, the chunk is skipped (no re-embed
     needed). Pass None or omit for backward-compatible always-upsert behaviour.
     """
+    t0 = time.monotonic()
     if on_conflict == "update":
         conflict_clause = """
             ON CONFLICT (source, source_id, chunk_index)
@@ -410,9 +559,11 @@ async def upsert_chunks(
                     inserted += 1
         except Exception as e:
             logger.error(f"Insert error for {source_id}[{idx}]: {e}")
+    DB_WRITE_DURATION.observe(time.monotonic() - t0)
     return inserted
 
 
+@trace_bulk_upsert_chunks
 async def bulk_upsert_chunks(
     conn,
     rows: list[
@@ -430,6 +581,8 @@ async def bulk_upsert_chunks(
     """
     if not rows:
         return 0
+
+    t0 = time.monotonic()
 
     if on_conflict == "update":
         conflict_clause = """
@@ -461,6 +614,7 @@ async def bulk_upsert_chunks(
         async with conn.cursor() as cur:
             await cur.executemany(sql, params)
 
+    DB_WRITE_DURATION.observe(time.monotonic() - t0)
     return len(rows)
 
 
@@ -500,6 +654,7 @@ async def update_job_progress(conn, job_id: int, processed: int):
     )
 
 
+@trace_job
 async def create_job(conn, source: str, total: int | None = None) -> int:
     row = await (
         await conn.execute(
@@ -514,6 +669,7 @@ async def create_job(conn, source: str, total: int | None = None) -> int:
     return row[0]
 
 
+@trace_job
 async def finish_job(
     conn,
     job_id: int,
@@ -558,6 +714,7 @@ async def finish_job(
     await conn.execute(sql, params)
 
 
+@trace_dlq
 async def write_to_dlq(
     conn,
     source: str,

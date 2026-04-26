@@ -21,6 +21,9 @@ from pathlib import Path
 import httpx
 from dotenv import load_dotenv
 
+from structured_logging import configure_basic_logging, get_ingestion_logger, set_correlation_id
+from tracing import get_tracer, set_span_error
+from lineage import emit_dlq_lineage, emit_job_lineage
 from utils import (
     chunk_text,
     compute_content_hash,
@@ -34,12 +37,17 @@ from utils import (
     save_raw,
     iter_raw,
     latest_raw,
+    start_metrics_server,
+    INGESTION_CHUNKS_PROCESSED,
+    INGESTION_JOBS_FAILED,
+    INGESTION_DLQ_MESSAGES,
 )
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger(__name__)
+configure_basic_logging("pubmed")
+logger = get_ingestion_logger("pubmed")
+_tracer = get_tracer("parsnip.ingestion.pubmed")
 
 PUBMED_EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 BATCH_SIZE = 32
@@ -251,6 +259,9 @@ async def process_papers(papers: list[dict], conn, job_id: int) -> int:
 
 
 async def main_async(terms: list[str], max_per_term: int, from_raw: Path | None):
+    start_metrics_server()
+    with _tracer.start_as_current_span("ingest_pubmed") as span:
+        span.set_attribute("source", "pubmed")
     conn = None
     job_id = None
     try:
@@ -264,9 +275,13 @@ async def main_async(terms: list[str], max_per_term: int, from_raw: Path | None)
         logger.info(f"Processing {len(papers)} PubMed articles…")
         conn = await get_db_connection()
         job_id = await create_job(conn, "pubmed", len(papers))
+        set_correlation_id(str(job_id))
+        span.set_attribute("correlation_id", str(job_id))
         await conn.commit()
 
         total = await process_papers(papers, conn, job_id)
+        INGESTION_CHUNKS_PROCESSED.labels(source="pubmed", status="success").inc(total)
+        await emit_job_lineage(conn, job_id)
         await finish_job(conn, job_id, "done")
         await conn.commit()
         conn = None  # prevent finally from closing again
@@ -274,17 +289,22 @@ async def main_async(terms: list[str], max_per_term: int, from_raw: Path | None)
             f"PubMed ingestion complete: {total} chunks from {len(papers)} articles"
         )
     except Exception as exc:
+        set_span_error(span, exc)
         logger.error(f"pubmed ingestion failed: {exc}", exc_info=True)
+        INGESTION_JOBS_FAILED.labels(source="pubmed").inc()
         if conn is not None and job_id is not None:
             try:
                 await write_to_dlq(conn, source="pubmed", source_id=f"job:{job_id}",
                                    content=None, metadata={"job_id": job_id}, error=exc)
+                INGESTION_DLQ_MESSAGES.labels(source="pubmed").inc()
+                await emit_dlq_lineage(conn, source="pubmed", job_id=job_id)
                 await finish_job(conn, job_id, "failed", error_message=str(exc)[:500])
                 await conn.commit()
             except Exception as finish_exc:
                 logger.error(f"Failed to mark job as failed: {finish_exc}")
         raise
     finally:
+        set_correlation_id(None)
         if conn is not None:
             try:
                 await conn.rollback()
