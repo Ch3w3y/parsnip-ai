@@ -30,3 +30,11 @@ Added rate limiting to 4 ingestion scripts that lacked delay between API calls:
 - No syntax errors detected
 - No LSP diagnostics errors
 - Follows existing code style and conventions from `ingest_wikipedia_updates.py`
+## content_hash column addition (Phase 2 data integrity)
+
+- `content_hash TEXT` added nullable (no DEFAULT) to `knowledge_chunks` in `db/init.sql` between `content` and `metadata`
+- Migration `003_content_hash.sql` uses `ADD COLUMN IF NOT EXISTS` — idempotent, follows `002_ingestion_jobs_extend.sql` pattern
+- `compute_content_hash()` uses `hashlib.sha256(..., usedforsecurity=False)` — avoids FIPS issues
+- `verify_hash()` returns True for None (backward compat) — callers must not assume False means corrupted; it could just be unhashed
+- `py_compile` passes but runtime import needs httpx/psycopg — standalone hash logic verified independently
+- SHA-256 hex is always 64 chars; stored as TEXT for simplicity (no CHAR(64) constraint needed)

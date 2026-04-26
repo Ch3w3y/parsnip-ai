@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS knowledge_chunks (
     source_id       TEXT        NOT NULL,   -- article title, DOI, repo slug, URL
     chunk_index     INTEGER     NOT NULL DEFAULT 0,
     content         TEXT        NOT NULL,
+    content_hash    TEXT,                    -- SHA-256 hex of content; NULL for pre-existing rows
     metadata        JSONB       NOT NULL DEFAULT '{}',
     embedding       VECTOR(1024),
     embedding_model TEXT        NOT NULL DEFAULT 'mxbai-embed-large',

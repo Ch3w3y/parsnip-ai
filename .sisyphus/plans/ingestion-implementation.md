@@ -39,11 +39,11 @@
 
 ## Phase 2: Data Integrity
 
-- [ ] **2.1**: Add `content_hash` column to `knowledge_chunks` table (`TEXT` or `BYTEA`)
+- [x] **2.1**: Add `content_hash` column to `knowledge_chunks` table (`TEXT` or `BYTEA`)
 - [ ] **2.2**: Hash content before embedding in all `ingest_*.py` (SHA-256)
 - [ ] **2.3**: Skip embedding for unchanged content in upsert logic (ON CONFLICT + content_hash check)
 - [ ] **2.4**: Backfill `content_hash` for existing rows
-- [ ] **2.5**: Add `verify_hash()` utility function for integrity checks
+- [x] **2.5**: Add `verify_hash()` utility function for integrity checks
 
 ---
 

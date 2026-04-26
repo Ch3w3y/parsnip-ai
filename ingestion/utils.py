@@ -4,6 +4,7 @@ Shared utilities for ingestion scripts.
 
 import asyncio
 import gzip
+import hashlib
 import json
 import logging
 import os
@@ -199,6 +200,23 @@ def latest_raw(source: str) -> Path | None:
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "mxbai-embed-large")
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
+
+
+def compute_content_hash(text: str) -> str:
+    """Return SHA-256 hex digest of text (UTF-8 encoded)."""
+    return hashlib.sha256(text.encode("utf-8"), usedforsecurity=False).hexdigest()
+
+
+def verify_hash(content: str, content_hash: str | None) -> bool:
+    """Check whether content matches its stored SHA-256 hash.
+
+    Returns True if content_hash is None (backward compat — unhashed rows)
+    or if the computed hash matches content_hash. Returns False only when
+    content_hash is set and doesn't match.
+    """
+    if content_hash is None:
+        return True
+    return compute_content_hash(content) == content_hash
 
 
 def chunk_text(text: str, chunk_words: int = 200, overlap_words: int = 40) -> list[str]:
